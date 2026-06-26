@@ -1,0 +1,439 @@
+{
+  "simulation": {
+    "n_episodes": 5000,
+    "episode_duration_sec": 5.0,
+    "dt_sec": 0.001,
+    "decision_interval_sec": 0.02
+  },
+  "termination": {
+    "boundary": {
+      "cart_position": [-5.0, 5.0],
+      "pendulum_angle": [-1.0472, 1.0472]
+    },
+    "stabilization": {
+      "pendulum_angle": [-0.02, 0.02],
+      "pendulum_velocity": [-0.1, 0.1],
+      "cart_position": [-0.1, 0.1],
+      "cart_velocity": [-0.1, 0.1]
+    },
+    "reason_codes": {
+      "none": 0,
+      "limit_exceeded": 1,
+      "stabilization_success": 2,
+      "time_limit": 3
+    }
+  },
+  "dynamic_system": {
+    "name": "cart_pole",
+    "initial_state": {
+      "cart_position": 0.0,
+      "cart_velocity": 0.0,
+      "pendulum_angle": 0.157,
+      "pendulum_velocity": 0.0
+    },
+    "params": {
+      "mass_cart_kg": 5.0,
+      "mass_pendulum_kg": 1.0,
+      "l": 1.0,
+      "g": 9.81,
+      "cart_friction_coef": 0.0,
+      "pivot_friction_coef": 0.0,
+      "max_torque_nm": 2.0,
+      "gear_ratio": 1.0,
+      "pinion_radius_m": 0.05
+    },
+    "state_normalization": {
+      "output_limits": [-1.0, 1.0],
+      "ranges": {
+        "cart_position": [-5.0, 5.0],
+        "cart_velocity": [-7.5, 7.5],             # 8.0
+        "pendulum_angle": [-1.0472, 1.0472],
+        "pendulum_velocity": [-3.0, 3.0]          # 3.5
+      }
+    }
+  },
+  "control": {
+    "mixing_policy": "sum",
+    "global_actuator_limits": [-1.0, 1.0],
+    "objectives_in": "raw",                      # "raw"  |  "norm"
+    "controllers": [
+      {
+        "id": "pendulum_angle",
+        "objective": "pendulum_angle",
+        "setpoint_raw": 0.0,
+        "error_sign": "measurement_minus_setpoint",
+        "calculation_mode": "incremental",           # "position" | "incremental"
+        "initial_gains": {"kp": 1.0, "ki": 1.0, "kd": 1.0},
+        "gain_update": {
+          "kp": {"min": 0.0, "max": 5, "delta_gain": 0.5},
+          "ki": {"min": 0.0, "max": 5, "delta_gain": 0.5},
+          "kd": {"min": 0.0, "max": 5, "delta_gain": 0.5}
+        },
+        "antiwindup": {"method": "conditional"}
+      },
+      {
+        "id": "cart_position",
+        "objective": "cart_position",
+        "setpoint_raw": 0.0,
+        "error_sign": "setpoint_minus_measurement",
+        "calculation_mode": "incremental",            # "position" | "incremental"
+        "initial_gains": {"kp": 1.0, "ki": 1.0, "kd": 1.0},
+        "gain_update": {
+          "kp": {"min": 0.0, "max": 5, "delta_gain": 0.5},
+          "ki": {"min": 0.0, "max": 5, "delta_gain": 0.5},
+          "kd": {"min": 0.0, "max": 5, "delta_gain": 0.5}
+        },
+        "antiwindup": {"method": "conditional"}
+      }
+    ],
+    "signal_normalization": [
+      {
+        "var_obj": "pendulum_angle",
+        "signals": {
+          "error": [-1.0, 1.0],
+          "derivative_error": [-3.0, 3.0],
+          "integral_error": [-0.75, 0.75],
+          "u_demand": [-3.0, 3.0],
+          "delta_u_demand": [-0.015, 0.015],
+          "u_alloc": [-4.0, 4.0],
+          "delta_u_alloc": [-0.15, 0.15],
+          "u_unallocated": [-3.0, 3.0]
+        }
+      },
+      {
+        "var_obj": "cart_position",
+        "signals": {
+          "error": [-1.0, 1.0],
+          "derivative_error": [-7.5, 7.5],
+          "integral_error": [-4.0, 4.0],
+          "u_demand": [-3.0, 3.0],
+          "delta_u_demand": [-0.005, 0.005],
+          "u_alloc": [-3.0, 3.0],
+          "delta_u_alloc": [-0.005, 0.005],
+          "u_unallocated": [-2.0, 2.0]
+        }
+      }
+    ]
+  },
+  "agent": {
+    "type": "pid_qlearning",
+    "params": {
+      "algorithm": "q_learning",
+      "discount_factor": 0.997,
+      "epsilon": 1.0,
+      "epsilon_decay": {
+        "enabled": true,
+        "decay_factor": 0.998849,
+        "epsilon_min": 0.01
+      },
+      "learning_rate": 0.2,
+      "learning_rate_decay": {
+        "enabled": true,
+        "decay_factor": 0.99925,
+        "learning_rate_min": 0.01
+      }
+    },
+    "actions": [
+      {"id": 0, "label": "decrease", "move": -1},
+      {"id": 1, "label": "maintain", "move": 0},
+      {"id": 2, "label": "increase", "move": 1}
+    ],
+    "gain_agents": [
+      {"id": "kp_pendulum_angle", "controller": "pendulum_angle", "gain": "kp", "state_series": ["kp_pendulum_angle"]},
+      {"id": "ki_pendulum_angle", "controller": "pendulum_angle", "gain": "ki", "state_series": ["ki_pendulum_angle"]},
+      {"id": "kd_pendulum_angle", "controller": "pendulum_angle", "gain": "kd", "state_series": ["kd_pendulum_angle"]},
+      {"id": "kp_cart_position", "controller": "cart_position", "gain": "kp", "state_series": ["kp_cart_position"]},
+      {"id": "ki_cart_position", "controller": "cart_position", "gain": "ki", "state_series": ["ki_cart_position"]},
+      {"id": "kd_cart_position", "controller": "cart_position", "gain": "kd", "state_series": ["kd_cart_position"]}
+    ]
+  },
+  "metrics": {
+    "aggregation_output_limits": [0.0, 1.0],
+    "interval_metrics": [
+      {
+        "source": "error_pendulum_angle_norm",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 0.30,
+        "target": "cost_error_energy_01_pendulum_angle",
+        "diagnostics": [
+          {"method": "rms", "target": "error_pendulum_angle_rms_norm"}
+        ]
+      },
+      {
+        "source": "delta_u_alloc_pendulum_angle_norm",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 1.0,
+        "target": "cost_delta_u_01_pendulum_angle",
+        "diagnostics": [
+          {"method": "rms", "target": "delta_u_alloc_pendulum_angle_rms_norm"}
+        ]
+      },
+      {
+        "source": "error_cart_position_norm",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 0.75,
+        "target": "cost_error_energy_01_cart_position",
+        "diagnostics": [
+          {"method": "rms", "target": "error_cart_position_rms_norm"}
+        ]
+      },
+      {
+        "source": "delta_u_alloc_cart_position_norm",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 1.0,
+        "target": "cost_delta_u_01_cart_position",
+        "diagnostics": [
+          {"method": "rms", "target": "delta_u_alloc_cart_position_rms_norm"}
+        ]
+      },
+      {
+        "source": "u_total",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 1.0,
+        "target": "cost_u_total_01",
+        "diagnostics": [
+          {"method": "rms", "target": "u_total_rms_norm"}
+        ]
+      },
+      {
+        "source": "delta_u_total",
+        "step_transform": "square",
+        "aggregation": "mean",
+        "bound": 0.0008,
+        "target": "cost_delta_u_total_01",
+        "diagnostics": [
+          {"method": "rms", "target": "delta_u_total_rms_norm"}
+        ]
+      }
+    ]
+  },
+  "reward": {
+    "assignment": "controller_reward",
+    "domain": "signed_unit",
+    "composition": {
+      "weights": {
+        "local": 0.0,
+        "cooperative": 1.0,
+        "strategic": 0.0
+      }
+    },
+    "local": {
+      "controllers": [
+        {
+          "controller": "pendulum_angle",
+          "components": [
+            {"cost": "cost_error_energy_01_pendulum_angle", "weight": 1.0},
+            {"cost": "cost_delta_u_total_01", "weight": 0.0}
+          ]
+        },
+        {
+          "controller": "cart_position",
+          "components": [
+            {"cost": "cost_error_energy_01_cart_position", "weight": 1.0},
+            {"cost": "cost_delta_u_total_01", "weight": 0.0}
+          ]
+        }
+      ]
+    },
+    "cooperative": {
+      "enabled": true,
+      "mode": "norm-p",
+      "p": 50.0,                             # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
+      "variable_weights": {
+        "pendulum_angle": 0.7,
+        "cart_position": 0.3
+      }
+    },
+    "strategic": {
+      "enabled": false
+    },
+    terminal_learning_bonus: {
+      "enabled": true,
+      "bonuses":{
+        "limit_exceeded": -20.0,            # 5 -> suave | 10 -> clara | 5 -> fuerte | 50 -> dominante pero defendible
+        "stabilization_success": 20.0,
+        "time_limit": 0.0,
+        "none": 0.0
+        },
+      },
+  },
+  "data": {
+    "output_root": "results_history_CartPole",
+    "episodes_per_dataset_chunk": 250,
+    "save_agent_state": true,
+    "agent_state_save_frequency": 2000,
+    "preserve_json_structure": true,
+    "output_schema": {
+      "step_data": [
+        "t_sec",
+        "cart_position_raw",
+        "cart_velocity_raw",
+        "pendulum_angle_raw",
+        "pendulum_velocity_raw",
+        "cart_position_norm",
+        "cart_velocity_norm",
+        "pendulum_angle_norm",
+        "pendulum_velocity_norm",
+        "cart_force",
+        "u_total_raw",
+        "u_total",
+        "delta_u_total",
+        "is_saturated_global",
+        "saturation_excess",
+        "saturation_proportion_global",
+        "error_pendulum_angle_raw",
+        "error_pendulum_angle_norm",
+        "derivative_error_pendulum_angle_raw",
+        "derivative_error_pendulum_angle_norm",
+        "integral_error_pendulum_angle_raw",
+        "integral_error_pendulum_angle_norm",
+        "u_demand_pendulum_angle_raw",
+        "u_demand_pendulum_angle_norm",
+        "delta_u_demand_pendulum_angle_raw",
+        "delta_u_demand_pendulum_angle_norm",
+        "u_alloc_pendulum_angle_raw",
+        "u_alloc_pendulum_angle_norm",
+        "delta_u_alloc_pendulum_angle_raw",
+        "delta_u_alloc_pendulum_angle_norm",
+        "u_unallocated_pendulum_angle_raw",
+        "u_unallocated_pendulum_angle_norm",
+        "kp_pendulum_angle",
+        "ki_pendulum_angle",
+        "kd_pendulum_angle",
+        "error_cart_position_raw",
+        "error_cart_position_norm",
+        "derivative_error_cart_position_raw",
+        "derivative_error_cart_position_norm",
+        "integral_error_cart_position_raw",
+        "integral_error_cart_position_norm",
+        "u_demand_cart_position_raw",
+        "u_demand_cart_position_norm",
+        "delta_u_demand_cart_position_raw",
+        "delta_u_demand_cart_position_norm",
+        "u_alloc_cart_position_raw",
+        "u_alloc_cart_position_norm",
+        "delta_u_alloc_cart_position_raw",
+        "delta_u_alloc_cart_position_norm",
+        "u_unallocated_cart_position_raw",
+        "u_unallocated_cart_position_norm",
+        "kp_cart_position",
+        "ki_cart_position",
+        "kd_cart_position"
+      ],
+      "interval_data": [
+        "interval_id",
+        "interval_start_step_idx",
+        "interval_end_step_idx",
+        "interval_t_start_sec",
+        "interval_n_steps",
+        "terminated",
+        "termination_reason_code",
+        "error_pendulum_angle_rms_norm",
+        "cost_error_energy_01_pendulum_angle",
+        "delta_u_alloc_pendulum_angle_rms_norm",
+        "cost_delta_u_01_pendulum_angle",
+        "local_cost_01_pendulum_angle",
+        "local_reward_signed_pendulum_angle",
+        "error_cart_position_rms_norm",
+        "cost_error_energy_01_cart_position",
+        "delta_u_alloc_cart_position_rms_norm",
+        "cost_delta_u_01_cart_position",
+        "local_cost_01_cart_position",
+        "local_reward_signed_cart_position",
+        "u_total_rms_norm",
+        "cost_u_total_01",
+        "delta_u_total_rms_norm",
+        "cost_delta_u_total_01",
+        "cooperative_cost_01",
+        "cooperative_reward_signed",
+        "reward_global_signed",
+        "global_interval_reward",
+        "reward_controller_pendulum_angle",
+        "reward_controller_cart_position",
+        "reward_agent_kp_pendulum_angle",
+        "reward_agent_ki_pendulum_angle",
+        "reward_agent_kd_pendulum_angle",
+        "reward_agent_kp_cart_position",
+        "reward_agent_ki_cart_position",
+        "reward_agent_kd_cart_position",
+        "reward_for_learning_kp_pendulum_angle",
+        "reward_for_learning_ki_pendulum_angle",
+        "reward_for_learning_kd_pendulum_angle",
+        "reward_for_learning_kp_cart_position",
+        "reward_for_learning_ki_cart_position",
+        "reward_for_learning_kd_cart_position",
+        "action_kp_pendulum_angle",
+        "action_ki_pendulum_angle",
+        "action_kd_pendulum_angle",
+        "action_kp_cart_position",
+        "action_ki_cart_position",
+        "action_kd_cart_position",
+        "delta_gain_requested_kp_pendulum_angle",
+        "delta_gain_applied_kp_pendulum_angle",
+        "gain_value_kp_pendulum_angle",
+        "delta_gain_requested_ki_pendulum_angle",
+        "delta_gain_applied_ki_pendulum_angle",
+        "gain_value_ki_pendulum_angle",
+        "delta_gain_requested_kd_pendulum_angle",
+        "delta_gain_applied_kd_pendulum_angle",
+        "gain_value_kd_pendulum_angle",
+        "delta_gain_requested_kp_cart_position",
+        "delta_gain_applied_kp_cart_position",
+        "gain_value_kp_cart_position",
+        "delta_gain_requested_ki_cart_position",
+        "delta_gain_applied_ki_cart_position",
+        "gain_value_ki_cart_position",
+        "delta_gain_requested_kd_cart_position",
+        "delta_gain_applied_kd_cart_position",
+        "gain_value_kd_cart_position",
+        "td_error_kp_pendulum_angle",
+        "td_error_ki_pendulum_angle",
+        "td_error_kd_pendulum_angle",
+        "td_error_kp_cart_position",
+        "td_error_ki_cart_position",
+        "td_error_kd_cart_position",
+        "q_value_kp_pendulum_angle",
+        "q_value_ki_pendulum_angle",
+        "q_value_kd_pendulum_angle",
+        "q_value_kp_cart_position",
+        "q_value_ki_cart_position",
+        "q_value_kd_cart_position"
+      ],
+      "end_episode_data": [
+        "end_terminated",
+        "end_termination_reason_code",
+        "end_termination_reason",
+        "final_t_sec",
+        "final_cart_position_raw",
+        "final_cart_velocity_raw",
+        "final_pendulum_angle_raw",
+        "final_pendulum_velocity_raw",
+        "final_cart_position_norm",
+        "final_cart_velocity_norm",
+        "final_pendulum_angle_norm",
+        "final_pendulum_velocity_norm",
+        "total_reward",
+        "total_reward_pendulum_angle",
+        "total_reward_cart_position",
+        "final_kp_pendulum_angle",
+        "final_ki_pendulum_angle",
+        "final_kd_pendulum_angle",
+        "final_kp_cart_position",
+        "final_ki_cart_position",
+        "final_kd_cart_position",
+        "total_agent_decisions",
+        "epsilon",
+        "learning_rate"
+      ]
+    }
+  },
+  "config_files": {
+    "visualization": "sub_config_visualization_CartPole.yaml",
+    "data_summary": "sub_config_data_summary_CartPole.yaml"
+  }
+}

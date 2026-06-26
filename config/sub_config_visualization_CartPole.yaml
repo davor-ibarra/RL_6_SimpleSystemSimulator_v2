@@ -1,0 +1,673 @@
+visualization:
+  enabled: true
+  plots:
+    - type: bar
+      enabled: true
+      source: summary
+      variable: end_termination_reason
+      output_filename: fig1_termination_reason_distribution.png
+      config:
+        title: Termination Reason Distribution
+        title_fontsize: 28
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Episode Group [-]
+        xlabel_fontsize: 24
+        ylabel: Count [-]
+        ylabel_fontsize: 24
+        xmin: null
+        xmax: null
+        ymin: 0
+        ymax: null
+        tick_fontsize: 18
+        xtick_rotation: 0
+        num_xticks: null
+        num_yticks: null
+        show_legend: true
+        legend_var:
+          - {value: stabilization_success, color: "#0077BB", label: Goal reached}
+          - {value: limit_exceeded, color: "#EE7733", label: Limit exceeded}
+          - {value: time_limit, color: "#BBBBBB", label: Time limit}
+          - {value: none, color: "#999999", label: None}
+        legend_pos: lower right
+        legend_fontsize: xx-large
+        grid_on: false
+        group_size: 1000
+        cmap: tab20
+        bar_width: 0.8
+
+    - type: line
+      enabled: true
+      source: summary
+      x_variable: episode_id
+      y_variable: total_reward
+      output_filename: fig2_cumulative_reward_per_episode.png
+      config:
+        title: Cumulative Reward per Episode
+        title_fontsize: 14
+        figsize_w: 12
+        figsize_h: 6
+        xlabel: Episode [-]
+        xlabel_fontsize: 12
+        ylabel: Total Reward [-]
+        ylabel_fontsize: 12
+        xmin: null
+        xmax: null
+        ymin: null
+        ymax: null
+        tick_fontsize: 10
+        xtick_rotation: 30
+        num_xticks: null
+        num_yticks: null
+        show_legend: false
+        legend_pos: best
+        grid_on: false
+        line_color: "#1f77b4"
+        line_width: 1.0
+        marker_style: o
+        marker_size: 3
+        marker_color: "#ff7f0e"
+        filter_termination_reason: null
+
+    - type: multi_line
+      enabled: true
+      source: summary
+      x_variable: episode_id
+      y_variables:
+        - {variable: total_reward_pendulum_angle, label: Pendulum angle, color: "#0077BB"}
+        - {variable: total_reward_cart_position, label: Cart position, color: "#EE7733"}
+      output_filename: fig2a_controller_reward_per_episode.png
+      config:
+        title: Controller Rewards per Episode
+        title_fontsize: 14
+        figsize_w: 12
+        figsize_h: 6
+        xlabel: Episode [-]
+        xlabel_fontsize: 12
+        ylabel: Controller Reward [-]
+        ylabel_fontsize: 12
+        xmin: null
+        xmax: null
+        ymin: null
+        ymax: null
+        tick_fontsize: 10
+        xtick_rotation: 30
+        num_xticks: null
+        num_yticks: null
+        show_legend: true
+        legend_pos: best
+        grid_on: false
+        line_width: 1.0
+        marker_style: o
+        marker_size: 3
+        filter_termination_reason: null
+
+    - type: line
+      enabled: false
+      source: summary
+      x_variable: episode_id
+      y_variable: final_t_sec
+      output_filename: fig3_episode_duration_per_episode.png
+      config:
+        title: Episode Duration per Episode
+        title_fontsize: 14
+        figsize_w: 12
+        figsize_h: 6
+        xlabel: Episode [-]
+        xlabel_fontsize: 12
+        ylabel: Duration [s]
+        ylabel_fontsize: 12
+        xmin: null
+        xmax: null
+        ymin: 0
+        ymax: null
+        tick_fontsize: 10
+        xtick_rotation: 30
+        num_xticks: null
+        num_yticks: null
+        show_legend: false
+        legend_pos: best
+        grid_on: false
+        line_color: "#1f77b4"
+        line_width: 1.5
+        marker_style: o
+        marker_size: 3
+        marker_color: "#ff7f0e"
+        filter_termination_reason: null
+
+    - type: line
+      enabled: true
+      source: summary
+      x_variable: episode_id
+      y_variable: performance
+      output_filename: fig4_performance_per_episode.png
+      config:
+        title: Performance per Episode
+        title_fontsize: 14
+        figsize_w: 12
+        figsize_h: 6
+        xlabel: Episode [-]
+        xlabel_fontsize: 12
+        ylabel: Performance [-/s]
+        ylabel_fontsize: 12
+        xmin: null
+        xmax: null
+        ymin: null
+        ymax: null
+        tick_fontsize: 10
+        xtick_rotation: 30
+        num_xticks: null
+        num_yticks: null
+        show_legend: false
+        legend_pos: best
+        grid_on: false
+        line_color: "#1f77b4"
+        line_width: 1.0
+        marker_style: o
+        marker_size: 3
+        marker_color: "#ff7f0e"
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: true
+      name: heatmap_time_vs_pendulum_angle
+      source: detailed
+      x_variable: t_sec
+      y_variable: pendulum_angle_raw
+      value_variable: t_sec
+      output_filename: fig5_heatmap_time_vs_pendulum_angle.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Pendulum Angle
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Pendulum Angle [rad]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -0.34
+        ymax: 0.34
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 15000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: true
+      name: heatmap_t_vs_angle_stab
+      source: detailed
+      x_variable: t_sec
+      y_variable: pendulum_angle_raw
+      value_variable: t_sec
+      output_filename: fig6_heatmap_time_vs_pendulum_angle_stabilization_success.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Pendulum Angle (stabilization_success)
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Pendulum Angle [rad]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -0.34
+        ymax: 0.34
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: [stabilization_success]
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_time_vs_pendulum_velocity
+      source: detailed
+      x_variable: t_sec
+      y_variable: pendulum_velocity_raw
+      value_variable: t_sec
+      output_filename: fig7_heatmap_time_vs_pendulum_velocity.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Angular Velocity
+        title_fontsize: 18
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Time [s]
+        xlabel_fontsize: 16
+        ylabel: Pendulum Velocity [rad/s]
+        ylabel_fontsize: 16
+        xmin: 0
+        xmax: 5
+        ymin: -0.25
+        ymax: 0.25
+        tick_fontsize: 14
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_angle_vs_anglevel
+      source: detailed
+      x_variable: pendulum_angle_raw
+      y_variable: pendulum_velocity_raw
+      value_variable: pendulum_angle_raw
+      output_filename: fig8_heatmap_pendulum_angle_vs_pendulum_velocity.png
+      config:
+        aggregation: count
+        title: Heatmap - Angle vs Angular Velocity
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Pendulum Angle [rad]
+        xlabel_fontsize: 28
+        ylabel: Pendulum Velocity [rad/s]
+        ylabel_fontsize: 28
+        xmin: -0.34
+        xmax: 0.34
+        ymin: -0.25
+        ymax: 0.25
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 10000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: true
+      name: heatmap_cartpos_vs_cartvel
+      source: detailed
+      x_variable: cart_position_raw
+      y_variable: cart_velocity_raw
+      value_variable: cart_position_raw
+      output_filename: fig8_heatmap_cart_position_vs_cart_velocity.png
+      config:
+        aggregation: count
+        title: Heatmap - Cart Position vs Cart Velocity
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Cart Position [m]
+        xlabel_fontsize: 28
+        ylabel: Cart Velocity [m/s]
+        ylabel_fontsize: 28
+        xmin: -5.0
+        xmax: 5.0
+        ymin: -5.0
+        ymax: 5.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 10000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_time_vs_cart_position
+      source: detailed
+      x_variable: t_sec
+      y_variable: cart_position_raw
+      value_variable: t_sec
+      output_filename: fig9_heatmap_time_vs_cart_position.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Cart Position
+        title_fontsize: 18
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Time [s]
+        xlabel_fontsize: 16
+        ylabel: Cart Position [m]
+        ylabel_fontsize: 16
+        xmin: 0
+        xmax: 5
+        ymin: -2.0
+        ymax: 2.0
+        tick_fontsize: 14
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 6
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_t_vs_cartpos_stab
+      source: detailed
+      x_variable: t_sec
+      y_variable: cart_position_raw
+      value_variable: t_sec
+      output_filename: fig10_heatmap_time_vs_cart_position_stabilization_success.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Cart Position (stabilization_success)
+        title_fontsize: 18
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Time [s]
+        xlabel_fontsize: 16
+        ylabel: Cart Position [m]
+        ylabel_fontsize: 16
+        xmin: 0
+        xmax: 5
+        ymin: null
+        ymax: null
+        tick_fontsize: 14
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: [stabilization_success]
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_t_vs_cartvel_stab
+      source: detailed
+      x_variable: t_sec
+      y_variable: cart_velocity_raw
+      value_variable: t_sec
+      output_filename: fig10_heatmap_time_vs_cart_velocity_stabilization_success.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Cart Velocity (stabilization_success)
+        title_fontsize: 18
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Time [s]
+        xlabel_fontsize: 16
+        ylabel: Cart Velocity [m/s]
+        ylabel_fontsize: 16
+        xmin: 0
+        xmax: 5
+        ymin: null
+        ymax: null
+        tick_fontsize: 14
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: [stabilization_success]
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_time_vs_cart_velocity
+      source: detailed
+      x_variable: t_sec
+      y_variable: cart_velocity_raw
+      value_variable: t_sec
+      output_filename: fig11_heatmap_time_vs_cart_velocity.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Cart Velocity
+        title_fontsize: 18
+        figsize_w: 14
+        figsize_h: 10
+        xlabel: Time [s]
+        xlabel_fontsize: 16
+        ylabel: Cart Velocity [m/s]
+        ylabel_fontsize: 16
+        xmin: 0
+        xmax: 5
+        ymin: -1.5
+        ymax: 1.5
+        tick_fontsize: 14
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 5
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_t_vs_ualloc_pendulum
+      source: detailed
+      x_variable: t_sec
+      y_variable: u_alloc_pendulum_angle_raw
+      value_variable: t_sec
+      output_filename: fig12a_heatmap_time_vs_pendulum_u_alloc.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Pendulum Allocated Control
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Pendulum allocated control [-]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -1.0
+        ymax: 1.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 9
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 5000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_t_vs_ualloc_pendulum_stab
+      source: detailed
+      x_variable: t_sec
+      y_variable: u_alloc_pendulum_angle_raw
+      value_variable: t_sec
+      output_filename: fig12_heatmap_time_vs_pendulum_u_alloc_stabilization_success.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Pendulum Allocated Control (stabilization_success)
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Pendulum allocated control [-]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -1.0
+        ymax: 1.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 9
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: [stabilization_success]
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_t_vs_ut
+      source: detailed
+      x_variable: t_sec
+      y_variable: u_total
+      value_variable: t_sec
+      output_filename: fig12b_heatmap_time_vs_u_total.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Total Control Action
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Total control action [-]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -1.0
+        ymax: 1.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 9
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 5000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
+
+    - type: heatmap
+      enabled: true
+      name: heatmap_t_vs_ut_stab
+      source: detailed
+      x_variable: t_sec
+      y_variable: u_total
+      value_variable: t_sec
+      output_filename: fig12a_heatmap_time_vs_u_total_stabilization_success.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Total Control Action (stabilization_success)
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Total control action [-]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -1.0
+        ymax: 1.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 9
+        clabel: Frequency [-]
+        clabel_fontsize: 14
+        cmin: null
+        cmax: null
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: [stabilization_success]
+
+    - type: heatmap
+      enabled: false
+      name: heatmap_time_vs_cart_force
+      source: detailed
+      x_variable: t_sec
+      y_variable: cart_force
+      value_variable: t_sec
+      output_filename: fig12c_heatmap_time_vs_cart_force.png
+      config:
+        aggregation: count
+        title: Heatmap - Time vs Cart Force
+        title_fontsize: 30
+        figsize_w: 16
+        figsize_h: 12
+        xlabel: Time [s]
+        xlabel_fontsize: 28
+        ylabel: Cart force [N]
+        ylabel_fontsize: 28
+        xmin: 0
+        xmax: 5
+        ymin: -30.0
+        ymax: 30.0
+        tick_fontsize: 24
+        xtick_rotation: 30
+        num_xticks: 5
+        num_yticks: 9
+        clabel: Frequency [-]
+        clabel_fontsize: 26
+        cmin: null
+        cmax: 5000
+        cmap: hot
+        bins: 500
+        log_scale: false
+        grid_on: false
+        filter_termination_reason: null
