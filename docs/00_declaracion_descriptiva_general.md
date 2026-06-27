@@ -99,6 +99,8 @@ donde $c \in [0,1]$ y $r \in [-1,1]$. Esta relacion mantiene una interpretacion 
 
 El sistema conserva asi una correspondencia directa entre desempeno fisico, costo agregado y senal de aprendizaje.
 
+El componente cooperativo puede expresar la calidad comun como potencial $\Phi \in [0,1]$ derivado de costos locales normalizados. En la ruta absoluta, la recompensa cooperativa conserva la equivalencia con $1-2c$. En las rutas de progreso, la recompensa usa $\Delta\Phi$ y, opcionalmente, un termino residual proporcional a $1-\Phi$. Estas senales siguen perteneciendo al dominio firmado antes de su composicion con las recompensas de controlador.
+
 ## Persistencia y trazabilidad
 
 Cada episodio se persiste con tres secciones:

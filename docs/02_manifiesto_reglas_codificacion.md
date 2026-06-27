@@ -112,7 +112,7 @@ $$
 r = 1 - 2c.
 $$
 
-La recompensa local debe depender de metricas propias del lazo, como error y variacion de esfuerzo asignado. La cooperacion debe combinar costos locales normalizados mediante un modo declarado y verificable, sin introducir metricas cruzadas entre lazos. El modo cooperativo admitido es `norm-p`, con exponente declarado en configuracion y $p \geq 1$; $p=1$ equivale a una media ponderada lineal y $p=2$ equivale a una media RMS ponderada. La recompensa estrategica solo puede activarse si existe una implementacion explicita y verificable.
+La recompensa local debe depender de metricas propias del lazo, como error y variacion de esfuerzo asignado. La cooperacion debe combinar costos locales normalizados mediante un modo declarado y verificable, sin introducir metricas cruzadas entre lazos. Los modos de potencial admitidos son `norm-p` y `geometric_consensus`; los modos de recompensa cooperativa admitidos son `absolute`, `progress` y `progress_residual`. La ruta `norm-p` + `absolute` debe conservar compatibilidad numerica con la transformacion canonica $r=1-2c$. La memoria temporal cooperativa debe limitarse al potencial anterior del episodio y permanecer dentro de `RewardCalculator`. La recompensa estrategica solo puede activarse si existe una implementacion explicita y verificable.
 
 ## Regla 8: aprendizaje sin contexto oculto
 

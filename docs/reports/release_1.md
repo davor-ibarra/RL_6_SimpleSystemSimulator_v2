@@ -31,7 +31,7 @@ El release contiene los siguientes modulos operativos:
 - antiwindup condicional;
 - Q-learning discreto para ganancias PID;
 - procesamiento de metricas por intervalo;
-- recompensa local y cooperativa;
+- recompensa local, cooperativa y diagnostico de potencial cooperativo;
 - persistencia por episodios y chunks;
 - exportacion de metadata, summary, estado del agente y figuras post-run.
 
@@ -83,7 +83,7 @@ $$
 r \in [-1,1].
 $$
 
-La senal `cooperative_reward_signed` representa solo la recompensa cooperativa. Las senales `reward_global_signed` y `global_interval_reward` representan la recompensa global compuesta, definida como promedio de las recompensas compuestas de controlador.
+La senal `cooperative_reward_signed` representa solo la recompensa cooperativa. Las senales `cooperative_potential_01` y `delta_cooperative_potential_signed` registran el potencial cooperativo actual y su progreso de intervalo cuando la rama de recompensa expandida esta activa. Las senales `reward_global_signed` y `global_interval_reward` representan la recompensa global compuesta, definida como promedio de las recompensas compuestas de controlador.
 
 ## Estado de implementacion
 

@@ -257,13 +257,27 @@ $$
 r^{\mathrm{local}}_j = 1 - 2c^{\mathrm{local}}_j.
 $$
 
-El costo cooperativo combina unicamente los costos locales ya normalizados. El modo se declara en `reward.cooperative.mode`; para el modo `norm-p`, el exponente se declara en `reward.cooperative.p`. Los pesos son no negativos:
+El componente cooperativo combina unicamente los costos locales ya normalizados. El modo de potencial se declara en `reward.cooperative.mode` y la transformacion temporal de recompensa se declara en `reward.cooperative.reward_mode`. Los pesos son no negativos:
 
 $$
 \qquad \sum_j \lambda_j = 1.
 $$
 
-En modo `norm-p`, con $p \geq 1$, el costo cooperativo es:
+El calculador deriva primero un potencial cooperativo:
+
+$$
+\Phi_t \in [0,1],
+$$
+
+y registra el residuo cooperativo como:
+
+$$
+c^{\mathrm{coop}}_t = 1 - \Phi_t.
+$$
+
+La senal `cooperative_cost_01` conserva este residuo. La senal `cooperative_potential_01` conserva el potencial actual.
+
+En modo `norm-p`, con $p \geq 1$, el costo cooperativo se calcula como:
 
 $$
 c^{\mathrm{coop}}
@@ -293,10 +307,49 @@ $$
 
 Valores mayores de $p$ incrementan la influencia relativa de los lazos con mayor costo local. La formulacion conserva $c^{\mathrm{coop}} \in [0,1]$ cuando los costos locales pertenecen a $[0,1]$. La cooperacion no introduce metricas cruzadas entre controladores; solo agrega el desempeno local declarado para cada lazo.
 
-La recompensa cooperativa es:
+En este modo, el potencial equivalente es:
 
 $$
-r^{\mathrm{coop}} = 1 - 2c^{\mathrm{coop}}.
+\Phi_t = 1 - c^{\mathrm{coop}}_t.
+$$
+
+En modo `geometric_consensus`, el potencial se calcula como:
+
+$$
+\Phi_t =
+\exp
+\left(
+\sum_j \lambda_j
+\log
+\left(
+\max(\epsilon, 1-c^{\mathrm{local}}_{j,t})
+\right)
+\right),
+$$
+
+con $0 < \epsilon < 1$. Este modo penaliza de forma multiplicativa el deterioro simultaneo de los lazos sin recalcular costos desde senales fisicas.
+
+El calculador mantiene un unico escalar temporal interno, $\Phi_{t-1}$, reiniciado al comienzo de cada episodio. En el primer intervalo del episodio se inicializa con $\Phi_t$, de modo que:
+
+$$
+\Delta \Phi_t = \Phi_t - \Phi_{t-1} = 0.
+$$
+
+La senal `delta_cooperative_potential_signed` conserva este progreso cooperativo firmado. La recompensa cooperativa final depende de `reward_mode`:
+
+$$
+r^{\mathrm{coop}}_t =
+\begin{cases}
+2\Phi_t - 1, & \texttt{absolute}, \\
+\Delta\Phi_t, & \texttt{progress}, \\
+\Delta\Phi_t - \lambda_r(1-\Phi_t), & \texttt{progress\_residual}.
+\end{cases}
+$$
+
+El resultado se recorta a $[-1,1]$ antes de la composicion con la recompensa local. La combinacion `norm-p` + `absolute` reproduce la ruta cooperativa anterior:
+
+$$
+2\Phi_t - 1 = 1 - 2c^{\mathrm{coop}}_t.
 $$
 
 La recompensa de controlador se compone como:
@@ -321,7 +374,7 @@ r^{\mathrm{global}} =
 \right).
 $$
 
-La senal `cooperative_reward_signed` conserva solo la recompensa cooperativa. Las senales `reward_global_signed` y `global_interval_reward` conservan la recompensa global compuesta. En Release 1, la recompensa estrategica permanece inactiva. La asignacion activa entrega a cada agente de ganancia la recompensa del controlador al que pertenece.
+La senal `cooperative_reward_signed` conserva solo la recompensa cooperativa ya transformada por el modo activo. Las senales `cooperative_potential_01` y `delta_cooperative_potential_signed` agregan diagnostico del potencial y su progreso. Las senales `reward_global_signed` y `global_interval_reward` conservan la recompensa global compuesta. En Release 1, la recompensa estrategica permanece inactiva. La asignacion activa entrega a cada agente de ganancia la recompensa del controlador al que pertenece.
 
 ## Terminacion del episodio
 
