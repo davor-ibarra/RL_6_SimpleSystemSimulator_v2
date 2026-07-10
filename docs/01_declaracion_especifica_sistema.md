@@ -251,7 +251,7 @@ c^{\mathrm{local}}_j
 = \sum_q w_{j,q} c_{j,q},
 $$
 
-con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. En la configuracion vigente, los componentes son `cost_error_energy_01_<controller>` y `cost_delta_u_01_<controller>`, de modo que cada costo local depende de metricas propias del lazo. La recompensa local firmada es:
+con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. En la configuracion vigente, los componentes son `cost_01_error_<controller>_square_sum` y `cost_01_derivative_error_<controller>_square_mean`, de modo que cada costo local depende de la energia acumulada del error y de la energia media de su derivada. La recompensa local firmada es:
 
 $$
 r^{\mathrm{local}}_j = 1 - 2c^{\mathrm{local}}_j.

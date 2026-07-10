@@ -213,7 +213,8 @@ class PIDController:
             return True
         u_unallocated = self.current_u_demand - u_alloc
         control_error = self.current_error_norm if self.objectives_in == "norm" else self.current_error_raw
-        return u_unallocated * control_error <= 0.0
+        integral_control_direction = self.ki * control_error
+        return u_unallocated * integral_control_direction <= 0.0
 
     def commit_step_history(self, u_alloc):
         self.previous_previous_error_raw = self.previous_error_raw

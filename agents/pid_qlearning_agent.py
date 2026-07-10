@@ -3,6 +3,19 @@ from dataclasses import dataclass
 import numpy as np
 
 
+@dataclass(frozen=True)
+class AdditionalStateSpec:
+    signal_id: str
+    source_name: str
+    source_array: np.ndarray
+    min_value: float
+    max_value: float
+    uses_thresholds: bool
+    thresholds: tuple
+    step: float
+    state_count: int
+
+
 @dataclass
 class GainAgent:
     agent_id: str
@@ -11,7 +24,10 @@ class GainAgent:
     min_gain: float
     max_gain: float
     state_step: float
+    gain_state_count: int
     initial_gain: float
+    additional_state_specs: tuple
+    additional_state_counts: tuple
     action_array: np.ndarray
     reward_array: np.ndarray
     gain_value_array: np.ndarray
@@ -38,6 +54,13 @@ def _state_count(min_gain, max_gain, state_step):
     return n_steps + 1
 
 
+def _product(values):
+    product = 1
+    for value in values:
+        product *= int(value)
+    return product
+
+
 def _gain_to_state_idx(gain_value, min_gain, max_gain, state_step):
     if not np.isfinite(gain_value):
         raise ValueError("gain value must be finite")
@@ -57,6 +80,115 @@ def _gain_to_state_idx(gain_value, min_gain, max_gain, state_step):
         raise ValueError("gain value must lie exactly on the gain state grid")
 
     return state_idx
+
+
+def _validate_additional_state_range(min_value, max_value):
+    if not np.isfinite(min_value):
+        raise ValueError("additional_state min must be finite")
+    if not np.isfinite(max_value):
+        raise ValueError("additional_state max must be finite")
+    if max_value <= min_value:
+        raise ValueError("additional_state max must be greater than min")
+
+
+def _build_additional_state_spec(interval, additional_state_config):
+    signal_id = additional_state_config["id"]
+    source_name = additional_state_config["source"]
+    min_value = float(additional_state_config["min"])
+    max_value = float(additional_state_config["max"])
+    _validate_additional_state_range(min_value, max_value)
+
+    has_thresholds = "thresholds" in additional_state_config
+    has_step = "step" in additional_state_config
+    if has_thresholds == has_step:
+        raise ValueError("additional_state must define exactly one discretization rule: thresholds or step")
+
+    if has_thresholds:
+        thresholds = tuple(float(value) for value in additional_state_config["thresholds"])
+        if len(thresholds) == 0:
+            raise ValueError("additional_state thresholds must not be empty")
+        previous_threshold = min_value
+        for threshold in thresholds:
+            if not np.isfinite(threshold):
+                raise ValueError("additional_state thresholds must be finite")
+            if threshold <= previous_threshold:
+                raise ValueError("additional_state thresholds must be strictly increasing")
+            if threshold >= max_value:
+                raise ValueError("additional_state thresholds must be lower than max")
+            previous_threshold = threshold
+        return AdditionalStateSpec(
+            signal_id=signal_id,
+            source_name=source_name,
+            source_array=getattr(interval, source_name),
+            min_value=min_value,
+            max_value=max_value,
+            uses_thresholds=True,
+            thresholds=thresholds,
+            step=0.0,
+            state_count=len(thresholds) + 1,
+        )
+
+    step = float(additional_state_config["step"])
+    state_count = _state_count(min_value, max_value, step)
+    return AdditionalStateSpec(
+        signal_id=signal_id,
+        source_name=source_name,
+        source_array=getattr(interval, source_name),
+        min_value=min_value,
+        max_value=max_value,
+        uses_thresholds=False,
+        thresholds=(),
+        step=step,
+        state_count=state_count,
+    )
+
+
+def _additional_state_to_idx(spec, value):
+    if not np.isfinite(value):
+        raise ValueError(f"additional_state source {spec.source_name} must be finite")
+    if value < spec.min_value - 1e-9 or value > spec.max_value + 1e-9:
+        raise ValueError(f"additional_state source {spec.source_name} must be inside its configured range")
+
+    if spec.uses_thresholds:
+        for threshold_idx, threshold in enumerate(spec.thresholds):
+            if value < threshold:
+                return threshold_idx
+        return len(spec.thresholds)
+
+    return _gain_to_state_idx(value, spec.min_value, spec.max_value, spec.step)
+
+
+def _additional_state_indices(additional_state_specs, interval_idx):
+    indices = []
+    for spec in additional_state_specs:
+        indices.append(_additional_state_to_idx(spec, float(spec.source_array[interval_idx])))
+    return tuple(indices)
+
+
+def _initial_additional_state_indices(additional_state_specs):
+    indices = []
+    for spec in additional_state_specs:
+        indices.append(_additional_state_to_idx(spec, spec.min_value))
+    return tuple(indices)
+
+
+def _flatten_state_idx(gain_state_idx, additional_state_indices, gain_state_count, additional_state_counts):
+    state_idx = int(gain_state_idx)
+    multiplier = int(gain_state_count)
+    for additional_state_idx, state_count in zip(additional_state_indices, additional_state_counts):
+        state_idx += int(additional_state_idx) * multiplier
+        multiplier *= int(state_count)
+    return state_idx
+
+
+def _unflatten_state_idx(state_idx, gain_state_count, additional_state_counts):
+    gain_state_idx = int(state_idx) % int(gain_state_count)
+    remainder = int(state_idx) // int(gain_state_count)
+    additional_state_indices = []
+    for state_count in additional_state_counts:
+        additional_state_indices.append(remainder % int(state_count))
+        remainder //= int(state_count)
+    return gain_state_idx, tuple(additional_state_indices)
 
 
 class PIDQLearningAgent:
@@ -81,6 +213,14 @@ class PIDQLearningAgent:
         if self.action_moves != [-1, 0, 1]:
             raise ValueError("PIDQLearningAgent expects actions with moves [-1, 0, 1]")
         self.maintain_action_idx = self.action_moves.index(0)
+
+        self.additional_state_specs = []
+        if "additional_state" in agent_config:
+            for additional_state_config in agent_config["additional_state"]:
+                self.additional_state_specs.append(
+                    _build_additional_state_spec(self.interval, additional_state_config)
+                )
+        self.additional_state_specs = tuple(self.additional_state_specs)
         
         control_by_id = {}
         for controller_config in control_config["controllers"]:
@@ -97,8 +237,22 @@ class PIDQLearningAgent:
             min_gain = float(gain_limits["min"])
             max_gain = float(gain_limits["max"])
             state_step = float(gain_limits["delta_gain"])
-            n_states = _state_count(min_gain, max_gain, state_step)
-            initial_state_idx = _gain_to_state_idx(initial_gain, min_gain, max_gain, state_step)
+            gain_state_count = _state_count(min_gain, max_gain, state_step)
+            initial_gain_state_idx = _gain_to_state_idx(initial_gain, min_gain, max_gain, state_step)
+            additional_state_specs = ()
+            if "additional_state" in gain_agent_config:
+                if bool(gain_agent_config["additional_state"]):
+                    if len(self.additional_state_specs) == 0:
+                        raise ValueError("gain agent requested additional_state but none are declared")
+                    additional_state_specs = self.additional_state_specs
+            additional_state_counts = tuple(spec.state_count for spec in additional_state_specs)
+            n_states = gain_state_count * _product(additional_state_counts)
+            initial_state_idx = _flatten_state_idx(
+                initial_gain_state_idx,
+                _initial_additional_state_indices(additional_state_specs),
+                gain_state_count,
+                additional_state_counts,
+            )
             self.tracks.append(
                 GainAgent(
                     agent_id=agent_id,
@@ -107,7 +261,10 @@ class PIDQLearningAgent:
                     min_gain=min_gain,
                     max_gain=max_gain,
                     state_step=state_step,
+                    gain_state_count=gain_state_count,
                     initial_gain=initial_gain,
+                    additional_state_specs=additional_state_specs,
+                    additional_state_counts=additional_state_counts,
                     action_array=getattr(self.interval, f"action_{agent_id}"),
                     reward_array=getattr(self.interval, f"reward_for_learning_{agent_id}"),
                     gain_value_array=getattr(self.interval, f"gain_value_{agent_id}"),
@@ -125,11 +282,17 @@ class PIDQLearningAgent:
 
     def reset_episode(self):
         for track in self.tracks:
-            track.current_state_idx = _gain_to_state_idx(
+            initial_gain_state_idx = _gain_to_state_idx(
                 track.initial_gain,
                 track.min_gain,
                 track.max_gain,
                 track.state_step,
+            )
+            track.current_state_idx = _flatten_state_idx(
+                initial_gain_state_idx,
+                _initial_additional_state_indices(track.additional_state_specs),
+                track.gain_state_count,
+                track.additional_state_counts,
             )
             track.last_state_idx = track.current_state_idx
             track.last_action_idx = self.maintain_action_idx
@@ -166,7 +329,13 @@ class PIDQLearningAgent:
             if not np.isfinite(applied_gain):
                 raise ValueError(f"Non-finite gain_value for agent {track.agent_id}")
 
-            next_state_idx = _gain_to_state_idx(applied_gain, track.min_gain, track.max_gain, track.state_step)
+            next_gain_state_idx = _gain_to_state_idx(applied_gain, track.min_gain, track.max_gain, track.state_step)
+            next_state_idx = _flatten_state_idx(
+                next_gain_state_idx,
+                _additional_state_indices(track.additional_state_specs, interval_idx),
+                track.gain_state_count,
+                track.additional_state_counts,
+            )
 
             current_q = track.q_table[state_idx, action_idx]
 
@@ -195,8 +364,39 @@ class PIDQLearningAgent:
         agents = []
         for track in self.tracks:
             gain_values = [
-                track.min_gain + state_idx * track.state_step for state_idx in range(track.q_table.shape[0])
+                track.min_gain + state_idx * track.state_step for state_idx in range(track.gain_state_count)
             ]
+            additional_states = []
+            for spec in track.additional_state_specs:
+                additional_state = {
+                    "id": spec.signal_id,
+                    "source": spec.source_name,
+                    "min": spec.min_value,
+                    "max": spec.max_value,
+                    "state_count": spec.state_count,
+                }
+                if spec.uses_thresholds:
+                    additional_state["thresholds"] = list(spec.thresholds)
+                else:
+                    additional_state["step"] = spec.step
+                additional_states.append(additional_state)
+
+            states = []
+            for state_idx in range(track.q_table.shape[0]):
+                gain_state_idx, additional_state_indices = _unflatten_state_idx(
+                    state_idx,
+                    track.gain_state_count,
+                    track.additional_state_counts,
+                )
+                state_row = {
+                    "state_index": int(state_idx),
+                    "gain_state_index": int(gain_state_idx),
+                    "gain_value": track.min_gain + gain_state_idx * track.state_step,
+                }
+                for spec, additional_state_idx in zip(track.additional_state_specs, additional_state_indices):
+                    state_row[f"{spec.signal_id}_state_index"] = int(additional_state_idx)
+                states.append(state_row)
+
             agents.append(
                 {
                     "agent_id": track.agent_id,
@@ -205,8 +405,11 @@ class PIDQLearningAgent:
                     "min_gain": track.min_gain,
                     "max_gain": track.max_gain,
                     "state_step": track.state_step,
+                    "gain_state_count": track.gain_state_count,
                     "current_state_idx": int(track.current_state_idx),
                     "gain_values": gain_values,
+                    "additional_states": additional_states,
+                    "states": states,
                     "q_table": track.q_table.tolist(),
                     "visits": track.visits.tolist(),
                 }

@@ -29,34 +29,31 @@ def _agent_tables(agent_state):
     q_rows = []
     visit_rows = []
     for agent in agent_state["agents"]:
-        gain_values = agent["gain_values"]
+        states = agent["states"]
         q_table = agent["q_table"]
         visits = agent["visits"]
-        for state_idx, gain_value in enumerate(gain_values):
-            q_rows.append(
-                {
-                    "agent_id": agent["agent_id"],
-                    "controller_id": agent["controller_id"],
-                    "gain_name": agent["gain_name"],
-                    "state_index": state_idx,
-                    "gain_value": gain_value,
-                    "q_decrease": q_table[state_idx][0],
-                    "q_maintain": q_table[state_idx][1],
-                    "q_increase": q_table[state_idx][2],
-                }
-            )
-            visit_rows.append(
-                {
-                    "agent_id": agent["agent_id"],
-                    "controller_id": agent["controller_id"],
-                    "gain_name": agent["gain_name"],
-                    "state_index": state_idx,
-                    "gain_value": gain_value,
-                    "visits_decrease": visits[state_idx][0],
-                    "visits_maintain": visits[state_idx][1],
-                    "visits_increase": visits[state_idx][2],
-                }
-            )
+        for state_idx, state in enumerate(states):
+            q_row = {
+                "agent_id": agent["agent_id"],
+                "controller_id": agent["controller_id"],
+                "gain_name": agent["gain_name"],
+            }
+            visit_row = {
+                "agent_id": agent["agent_id"],
+                "controller_id": agent["controller_id"],
+                "gain_name": agent["gain_name"],
+            }
+            for field_name in state:
+                q_row[field_name] = state[field_name]
+                visit_row[field_name] = state[field_name]
+            q_row["q_decrease"] = q_table[state_idx][0]
+            q_row["q_maintain"] = q_table[state_idx][1]
+            q_row["q_increase"] = q_table[state_idx][2]
+            visit_row["visits_decrease"] = visits[state_idx][0]
+            visit_row["visits_maintain"] = visits[state_idx][1]
+            visit_row["visits_increase"] = visits[state_idx][2]
+            q_rows.append(q_row)
+            visit_rows.append(visit_row)
     return q_rows, visit_rows
 
 

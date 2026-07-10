@@ -50,8 +50,14 @@ BASE_INTERVAL_SIGNALS = [
     "termination_reason_code",
     "cooperative_cost_01",
     "cooperative_reward_signed",
+    "cooperative_potential_base_01",
+    "synchrony_health_balance_01",
+    "synchrony_factor_01",
+    "collective_potential_01",
     "cooperative_potential_01",
     "delta_cooperative_potential_signed",
+    "cooperative_progress_residual_signed",
+    "residual_weight_effective",
     "reward_global_signed",
     "global_interval_reward",
 ]
@@ -97,18 +103,34 @@ def build_step_signal_names(config):
 def build_interval_signal_names(config):
     signal_names = list(BASE_INTERVAL_SIGNALS)
 
+    cooperative_config = config["reward"]["cooperative"]
+    if cooperative_config["reward_mode"] == "regime_residual":
+        _append_unique(signal_names, cooperative_config["regime_residual_params"]["signal"])
+
+    for controller_config in config["control"]["controllers"]:
+        controller_id = controller_config["id"]
+        _append_unique(signal_names, f"ratio_error_{controller_id}_raw")
+        _append_unique(signal_names, f"ratio_error_{controller_id}_norm")
+        _append_unique(signal_names, f"rate_error_{controller_id}_raw")
+        _append_unique(signal_names, f"rate_error_{controller_id}_norm")
+        _append_unique(signal_names, f"growth_error_{controller_id}_raw")
+        _append_unique(signal_names, f"growth_error_{controller_id}_norm")
+
     for metric_config in config["metrics"]["interval_metrics"]:
-        diagnostic_configs = []
-        if "diagnostics" in metric_config:
-            diagnostic_configs = metric_config["diagnostics"]
-        for diagnostic_config in diagnostic_configs:
-            _append_unique(signal_names, diagnostic_config["target"])
+        _append_unique(signal_names, metric_config["raw_target"])
         _append_unique(signal_names, metric_config["target"])
+
+        for diagnostic_config in metric_config.get("diagnostics", []):
+            _append_unique(signal_names, diagnostic_config["raw_target"])
+            _append_unique(signal_names, diagnostic_config["target"])
 
     for local_config in config["reward"]["local"]["controllers"]:
         controller_id = local_config["controller"]
         _append_unique(signal_names, f"local_cost_01_{controller_id}")
+        _append_unique(signal_names, f"local_health_01_{controller_id}")
+        _append_unique(signal_names, f"local_need_01_{controller_id}")
         _append_unique(signal_names, f"local_reward_signed_{controller_id}")
+        _append_unique(signal_names, f"cooperative_weight_effective_{controller_id}")
         _append_unique(signal_names, f"reward_controller_{controller_id}")
 
     for gain_agent_config in config["agent"]["gain_agents"]:
@@ -121,6 +143,10 @@ def build_interval_signal_names(config):
         _append_unique(signal_names, f"gain_value_{agent_id}")
         _append_unique(signal_names, f"td_error_{agent_id}")
         _append_unique(signal_names, f"q_value_{agent_id}")
+
+    if "additional_state" in config["agent"]:
+        for additional_state_config in config["agent"]["additional_state"]:
+            _append_unique(signal_names, additional_state_config["source"])
 
     return signal_names
 

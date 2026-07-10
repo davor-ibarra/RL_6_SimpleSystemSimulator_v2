@@ -85,14 +85,7 @@ class ControllerManager:
             controller.reset_episode(step_idx)
 
     def apply_gain_actions(self, interval_idx):
-        for (
-            controller_id,
-            gain_name,
-            action_array,
-            requested_array,
-            applied_array,
-            gain_value_array,
-        ) in self.gain_agents:
+        for (controller_id, gain_name,action_array, requested_array, applied_array, gain_value_array) in self.gain_agents:
             controller = self.controllers_by_id[controller_id]
             action_move = int(action_array[interval_idx])
             gain_limits = controller.gain_update[gain_name]
@@ -121,7 +114,6 @@ class ControllerManager:
     def sum_u_demands(self, u_demands):
         u_total_raw = 0.0
         for controller, u_demand in u_demands:
-            del controller
             u_total_raw += u_demand
         return u_total_raw
 

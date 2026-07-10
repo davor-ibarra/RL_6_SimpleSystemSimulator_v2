@@ -110,7 +110,7 @@ def main():
         config["simulation"]["dt_sec"],
     )
     agent = PIDQLearningAgent(runtime, config["agent"], config["control"])
-    metric_processor = MetricProcessor(runtime, config["metrics"])
+    metric_processor = MetricProcessor(runtime, config["metrics"], config["simulation"]["decision_interval_sec"])
     reward_calculator = RewardCalculator(runtime, config["reward"], config["agent"], config["termination"])
     metric_collector = MetricCollector(runtime, config["data"], result_handler)
 
