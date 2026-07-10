@@ -6,7 +6,7 @@ def _clip(value, lower, upper):
 
 
 class ControllerManager:
-    def __init__(self, runtime, control_config, agent_config, dynamic_config, termination_config, dt_sec):
+    def __init__(self, runtime, control_config, agent_config, dt_sec):
         self.step = runtime.step
         self.interval = runtime.interval
         self.dt_sec = dt_sec
@@ -18,27 +18,14 @@ class ControllerManager:
         if self.objectives_in not in ("raw", "norm"):
             raise ValueError("control.objectives_in must be raw or norm")
 
-        self.validate_normalized_control_ranges(control_config, dynamic_config, termination_config)
-        state_normalization = dynamic_config["state_normalization"]
-        state_ranges = state_normalization["ranges"]
-        state_output_limits = state_normalization["output_limits"]
-
-        signal_ranges_by_controller = {}
-        for normalization_config in control_config["signal_normalization"]:
-            signal_ranges_by_controller[normalization_config["var_obj"]] = normalization_config["signals"]
-
         self.controllers = []
         self.controllers_by_id = {}
         for controller_config in control_config["controllers"]:
             controller_id = controller_config["id"]
-            objective = controller_config["objective"]
             controller = PIDController(
                 runtime,
                 controller_config,
-                signal_ranges_by_controller[controller_id],
                 self.objectives_in,
-                state_ranges[objective],
-                state_output_limits,
             )
             self.controllers.append(controller)
             self.controllers_by_id[controller_id] = controller
@@ -57,21 +44,6 @@ class ControllerManager:
             )
 
         self.previous_u_total = 0.0
-
-    def validate_normalized_control_ranges(self, control_config, dynamic_config, termination_config):
-        if control_config["objectives_in"] != "norm":
-            return
-        state_ranges = dynamic_config["state_normalization"]["ranges"]
-        boundary = termination_config["boundary"]
-        for controller_config in control_config["controllers"]:
-            objective = controller_config["objective"]
-            expected_range = boundary[objective]
-            actual_range = state_ranges[objective]
-            if float(actual_range[0]) != float(expected_range[0]) or float(actual_range[1]) != float(expected_range[1]):
-                raise ValueError(
-                    f"state_normalization range for {objective} must match termination boundary "
-                    "when control.objectives_in is norm"
-                )
 
     def reset_episode(self, step_idx):
         self.previous_u_total = 0.0

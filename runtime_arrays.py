@@ -33,11 +33,21 @@ PID_RAW_NORM_STEMS = [
     "error",
     "derivative_error",
     "integral_error",
+    "p_term",
+    "i_term",
+    "d_term",
     "u_demand",
     "delta_u_demand",
     "u_alloc",
     "delta_u_alloc",
     "u_unallocated",
+]
+
+PID_INCREMENTAL_RAW_NORM_STEMS = [
+    "p_delta_term",
+    "i_delta_term",
+    "d_delta_term",
+    "delta_u_incremental",
 ]
 
 BASE_INTERVAL_SIGNALS = [
@@ -94,9 +104,18 @@ def build_step_signal_names(config):
         for stem in PID_RAW_NORM_STEMS:
             _append_unique(signal_names, f"{stem}_{controller_id}_raw")
             _append_unique(signal_names, f"{stem}_{controller_id}_norm")
+        if controller_config["calculation_mode"] == "incremental":
+            for stem in PID_INCREMENTAL_RAW_NORM_STEMS:
+                _append_unique(signal_names, f"{stem}_{controller_id}_raw")
+                _append_unique(signal_names, f"{stem}_{controller_id}_norm")
         _append_unique(signal_names, f"kp_{controller_id}")
         _append_unique(signal_names, f"ki_{controller_id}")
         _append_unique(signal_names, f"kd_{controller_id}")
+
+    for metric_config in config["metrics"]["interval_metrics"]:
+        sample_transform_config = metric_config["sample_transform"]
+        if "audit_target" in sample_transform_config:
+            _append_unique(signal_names, sample_transform_config["audit_target"])
     return signal_names
 
 
@@ -107,22 +126,20 @@ def build_interval_signal_names(config):
     if cooperative_config["reward_mode"] == "regime_residual":
         _append_unique(signal_names, cooperative_config["regime_residual_params"]["signal"])
 
-    for controller_config in config["control"]["controllers"]:
-        controller_id = controller_config["id"]
-        _append_unique(signal_names, f"ratio_error_{controller_id}_raw")
-        _append_unique(signal_names, f"ratio_error_{controller_id}_norm")
-        _append_unique(signal_names, f"rate_error_{controller_id}_raw")
-        _append_unique(signal_names, f"rate_error_{controller_id}_norm")
-        _append_unique(signal_names, f"growth_error_{controller_id}_raw")
-        _append_unique(signal_names, f"growth_error_{controller_id}_norm")
-
     for metric_config in config["metrics"]["interval_metrics"]:
         _append_unique(signal_names, metric_config["raw_target"])
         _append_unique(signal_names, metric_config["target"])
 
-        for diagnostic_config in metric_config.get("diagnostics", []):
-            _append_unique(signal_names, diagnostic_config["raw_target"])
-            _append_unique(signal_names, diagnostic_config["target"])
+        interval_reduce_config = metric_config["interval_reduce"]
+        if "audit_target" in interval_reduce_config:
+            _append_unique(signal_names, interval_reduce_config["audit_target"])
+        if "audit_stats" in interval_reduce_config:
+            for stat_name in interval_reduce_config["audit_stats"]:
+                _append_unique(signal_names, interval_reduce_config["audit_stats"][stat_name])
+
+        post_transform_config = metric_config["post_transform"]
+        if "audit_target" in post_transform_config:
+            _append_unique(signal_names, post_transform_config["audit_target"])
 
     for local_config in config["reward"]["local"]["controllers"]:
         controller_id = local_config["controller"]

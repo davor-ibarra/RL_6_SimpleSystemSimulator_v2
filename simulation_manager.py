@@ -136,7 +136,6 @@ class SimulationManager:
         self.interval.terminated[interval_idx] = 1.0 if self.terminated else 0.0
         self.interval.termination_reason_code[interval_idx] = self.termination_reason_code
 
-        self.metric_processor.calculate_metrics(interval_idx, interval_start_step, interval_end_step)
         self.metric_processor.aggregate_interval(interval_idx, interval_start_step, interval_end_step)
         self.reward_calculator.evaluate_interval(interval_idx)
         
