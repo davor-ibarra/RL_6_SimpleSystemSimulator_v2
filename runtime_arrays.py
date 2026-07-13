@@ -122,10 +122,6 @@ def build_step_signal_names(config):
 def build_interval_signal_names(config):
     signal_names = list(BASE_INTERVAL_SIGNALS)
 
-    cooperative_config = config["reward"]["cooperative"]
-    if cooperative_config["reward_mode"] == "regime_residual":
-        _append_unique(signal_names, cooperative_config["regime_residual_params"]["signal"])
-
     for metric_config in config["metrics"]["interval_metrics"]:
         _append_unique(signal_names, metric_config["raw_target"])
         _append_unique(signal_names, metric_config["target"])
@@ -141,14 +137,22 @@ def build_interval_signal_names(config):
         if "audit_target" in post_transform_config:
             _append_unique(signal_names, post_transform_config["audit_target"])
 
-    for local_config in config["reward"]["local"]["controllers"]:
+    reward_config = config["reward"]
+    for local_config in reward_config["local"]["controllers"]:
         controller_id = local_config["controller"]
         _append_unique(signal_names, f"local_cost_01_{controller_id}")
         _append_unique(signal_names, f"local_health_01_{controller_id}")
-        _append_unique(signal_names, f"local_need_01_{controller_id}")
         _append_unique(signal_names, f"local_reward_signed_{controller_id}")
-        _append_unique(signal_names, f"cooperative_weight_effective_{controller_id}")
         _append_unique(signal_names, f"reward_controller_{controller_id}")
+
+    cooperative_config = reward_config["cooperative"]
+    for variable_config in cooperative_config["potential"]["variables"]:
+        variable_id = variable_config["id"]
+        _append_unique(signal_names, f"local_need_01_{variable_id}")
+        _append_unique(signal_names, f"cooperative_weight_effective_{variable_id}")
+
+    if cooperative_config["reward_mode"] == "regime_residual":
+        _append_unique(signal_names, cooperative_config["regime_residual_params"]["signal"])
 
     for gain_agent_config in config["agent"]["gain_agents"]:
         agent_id = gain_agent_config["id"]

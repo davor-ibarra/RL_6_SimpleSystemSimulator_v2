@@ -139,7 +139,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "metric_error_pendulum_angle_mean_abs_norm",
-        "scaler": {"method": "clip_01"},
+        "scaler": {"method": "bound", "mode":"positive", "bound": 0.2, "clip":true},
         "target": "cost_01_error_pendulum_angle_operating"
       },
       {
@@ -148,7 +148,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "metric_error_cart_position_mean_abs_norm",
-        "scaler": {"method": "clip_01"},
+        "scaler": {"method": "bound", "mode":"positive", "bound": 0.2, "clip":true},
         "target": "cost_01_error_cart_position_operating"
       },
       {
@@ -280,8 +280,8 @@
     "domain": "signed_unit",
     "composition": {
       "weights": {
-        "local": 1.0,
-        "cooperative": 0.0,
+        "local": 0.5,
+        "cooperative": 0.5,
         "strategic": 0.0
       }
     },
@@ -312,27 +312,38 @@
     },
     "cooperative": {
       "enabled": true,
-      "mode": "norm-p",                       # "norm-p" | "geometric_consensus"
-      "reward_mode": "absolute",              # "absolute" | "progress" | "progress_residual" | "regime_residual"
-      "p": 1.0,                             # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
-      "epsilon_geom_conc": 1.0e-8,
+      "reward_mode": "progress_residual",              # "absolute" | "progress" | "progress_residual" | "regime_residual"
       "residual_weight": 0.1,
-      "variable_weights": {
-        "pendulum_angle": 0.6,
-        "cart_position": 0.4
+      "potential": {
+        "method": "geometric_consensus",                   # "norm-p" | "geometric_consensus"
+        "p": 1.0,                              # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
+        "epsilon_geom_conc": 1.0e-8,
+        "variables": [
+          {"id": "pendulum_angle", "source": "local_cost_01_pendulum_angle", "weight": 0.6},
+          {"id": "cart_position", "source": "local_cost_01_cart_position", "weight": 0.4}
+        ]
       },
       "adaptive_weights": {
-        "enabled": true,
+        "enabled": false,
         "weight_floor": 0.2,
         "deterioration_weight": 0.2,
-        "smoothing_alpha": 0.0
+        "smoothing_alpha": 0.0,
+        "need_variables": [
+          {"id": "pendulum_angle", "source": "local_cost_01_pendulum_angle"},
+          {"id": "cart_position", "source": "local_cost_01_cart_position"}
+        ]
       },
       "synchrony": {
-        "enabled": true,
-        "strength": 0.2
+        "enabled": false,
+        "strength": 0.2,
+        "health_variables": [
+          {"id": "pendulum_angle", "source": "local_health_01_pendulum_angle"},
+          {"id": "cart_position", "source": "local_health_01_cart_position"}
+        ]
       },
-      "adaptive_residual": {
-        "enabled": true,
+      "adaptive_residual": {                            # valores altos aumentan el peso residual segun `gamma`
+        "enabled": false,
+        "source": "cooperative_potential_01",
         "residual_weight_min": 0.02,
         "residual_weight_max": 0.1,
         "gamma": 2.0

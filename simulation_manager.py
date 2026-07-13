@@ -206,7 +206,9 @@ class SimulationManager:
         self.episode.final_cart_velocity_norm = float(self.step.cart_velocity_norm[final_step_idx])
         self.episode.final_pendulum_angle_norm = float(self.step.pendulum_angle_norm[final_step_idx])
         self.episode.final_pendulum_velocity_norm = float(self.step.pendulum_velocity_norm[final_step_idx])
-        self.episode.total_reward = float(self.interval.reward_global_signed[:n_intervals].sum())
+        self.episode.total_reward = float(
+            sum(reward_array[:n_intervals].sum() for reward_array, _ in self.controller_reward_totals)
+        )
         for reward_array, episode_signal_name in self.controller_reward_totals:
             setattr(self.episode, episode_signal_name, float(reward_array[:n_intervals].sum()))
         for controller_id, total_reward_signal, kp_array, ki_array, kd_array in self.controller_progress_items:

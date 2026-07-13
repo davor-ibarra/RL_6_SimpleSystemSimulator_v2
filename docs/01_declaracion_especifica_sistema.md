@@ -244,6 +244,8 @@ Las senales `<variable>_rms_norm` permiten observar amplitud promedio, mientras 
 
 ## Recompensa
 
+La recompensa declara las fuentes conceptuales que alimentan cada etapa y conserva nombres canonicos para sus resultados. Cada controlador local declara sus componentes de costo. La cooperacion declara por separado las fuentes del potencial, de la necesidad usada por los pesos adaptativos, de la salud usada por la sincronizacion y del residual adaptativo. Esta separacion permite cambiar una representacion cientifica sin renombrar salidas ni modificar `RewardCalculator`.
+
 Para cada controlador $j$, el costo local se define como combinacion convexa de componentes de costo configurados:
 
 $$
@@ -251,16 +253,16 @@ c^{\mathrm{local}}_j
 = \sum_q w_{j,q} c_{j,q},
 $$
 
-con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. En la configuracion vigente, los componentes son `cost_01_error_<controller>_square_sum` y `cost_01_derivative_error_<controller>_square_mean`, de modo que cada costo local depende de la energia acumulada del error y de la energia media de su derivada. La recompensa local firmada es:
+con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. La configuracion vigente mantiene como componente activo `cost_01_error_<controller>_operating`; las demas representaciones declaradas permanecen disponibles con peso cero para experimentacion. La recompensa local firmada es:
 
 $$
 r^{\mathrm{local}}_j = 1 - 2c^{\mathrm{local}}_j.
 $$
 
-El componente cooperativo combina unicamente los costos locales ya normalizados. El modo de potencial se declara en `reward.cooperative.mode` y la transformacion temporal de recompensa se declara en `reward.cooperative.reward_mode`. Los pesos son no negativos:
+El componente cooperativo combina los costos normalizados declarados en `reward.cooperative.potential.variables`. En la configuracion vigente sus fuentes son los costos locales, por lo que conserva el comportamiento anterior. El modo de potencial se declara en `reward.cooperative.potential.method` y la transformacion temporal de recompensa se declara en `reward.cooperative.reward_mode`. Los pesos son no negativos:
 
 $$
-\qquad \sum_j \lambda_j = 1.
+\qquad \sum_i \lambda_i = 1.
 $$
 
 El calculador deriva primero un potencial cooperativo:
@@ -283,15 +285,15 @@ $$
 c^{\mathrm{coop}}
 =
 \left(
-\sum_j \lambda_j
-\left(c^{\mathrm{local}}_j\right)^p
+\sum_i \lambda_i
+\left(c^{\mathrm{in}}_i\right)^p
 \right)^{1/p}.
 $$
 
 Cuando $p=1$, esta expresion equivale a una media ponderada lineal:
 
 $$
-c^{\mathrm{coop}} = \sum_j \lambda_j c^{\mathrm{local}}_j.
+c^{\mathrm{coop}} = \sum_i \lambda_i c^{\mathrm{in}}_i.
 $$
 
 Cuando $p=2$, equivale a una media RMS ponderada:
@@ -300,12 +302,12 @@ $$
 c^{\mathrm{coop}}
 =
 \sqrt{
-\sum_j \lambda_j
-\left(c^{\mathrm{local}}_j\right)^2
+\sum_i \lambda_i
+\left(c^{\mathrm{in}}_i\right)^2
 }.
 $$
 
-Valores mayores de $p$ incrementan la influencia relativa de los lazos con mayor costo local. La formulacion conserva $c^{\mathrm{coop}} \in [0,1]$ cuando los costos locales pertenecen a $[0,1]$. La cooperacion no introduce metricas cruzadas entre controladores; solo agrega el desempeno local declarado para cada lazo.
+Valores mayores de $p$ incrementan la influencia relativa de las variables con mayor costo. La formulacion conserva $c^{\mathrm{coop}} \in [0,1]$ cuando todas las fuentes declaradas pertenecen a $[0,1]$.
 
 En este modo, el potencial equivalente es:
 
@@ -319,17 +321,21 @@ $$
 \Phi_t =
 \exp
 \left(
-\sum_j \lambda_j
+\sum_i \lambda_i
 \log
 \left(
-\max(\epsilon, 1-c^{\mathrm{local}}_{j,t})
+\max(\epsilon, 1-c^{\mathrm{in}}_{i,t})
 \right)
 \right),
 $$
 
-con $0 < \epsilon < 1$. Este modo penaliza de forma multiplicativa el deterioro simultaneo de los lazos sin recalcular costos desde senales fisicas.
+con $0 < \epsilon < 1$. Este modo penaliza de forma multiplicativa el deterioro simultaneo de las variables declaradas sin recalcular costos desde senales fisicas.
 
-El calculador mantiene un unico escalar temporal interno, $\Phi_{t-1}$, reiniciado al comienzo de cada episodio. En el primer intervalo del episodio se inicializa con $\Phi_t$, de modo que:
+Cuando los pesos adaptativos estan activos, el intervalo actual utiliza necesidades calculadas en el intervalo anterior. Cada necesidad combina el costo declarado en `adaptive_weights.need_variables`, su deterioro positivo, el piso de peso y el suavizado configurado. Estas fuentes pueden ser distintas de las usadas para construir el potencial. El primer intervalo usa pesos uniformes porque aun no existe historia del episodio.
+
+La sincronizacion opcional compara el potencial base con la salud aritmetica ponderada de `synchrony.health_variables`; estas fuentes se interpretan directamente como salud en `[0,1]` y pueden diferir de los costos del potencial. Su factor, elevado a `synchrony.strength`, multiplica el potencial base y produce el potencial colectivo final. El residual adaptativo varia su peso entre los limites configurados segun `adaptive_residual.source`, interpretada como calidad en `[0,1]`. El modo `regime_residual` selecciona el modo basico y el peso residual mediante los umbrales declarados.
+
+El calculador mantiene $\Phi_{t-1}$ y, cuando corresponde, los costos y necesidades anteriores usados por la adaptacion de pesos. Toda esta memoria se reinicia al comienzo de cada episodio. En el primer intervalo, el potencial anterior se inicializa con $\Phi_t$, de modo que:
 
 $$
 \Delta \Phi_t = \Phi_t - \Phi_{t-1} = 0.
@@ -342,7 +348,8 @@ r^{\mathrm{coop}}_t =
 \begin{cases}
 2\Phi_t - 1, & \texttt{absolute}, \\
 \Delta\Phi_t, & \texttt{progress}, \\
-\Delta\Phi_t - \lambda_r(1-\Phi_t), & \texttt{progress\_residual}.
+\Delta\Phi_t - \lambda_r(1-\Phi_t), & \texttt{progress\_residual}, \\
+f_{g_t}(\Phi_t,\Delta\Phi_t), & \texttt{regime\_residual}.
 \end{cases}
 $$
 
