@@ -60,8 +60,12 @@ BASE_INTERVAL_SIGNALS = [
     "termination_reason_code",
     "cooperative_cost_01",
     "cooperative_reward_signed",
+    "cooperative_positive_progress_01",
+    "cooperative_deterioration_01",
+    "cooperative_progress_signed",
     "cooperative_potential_base_01",
-    "synchrony_health_balance_01",
+    "health_balance_01",
+    "balance_factor_01",
     "synchrony_factor_01",
     "collective_potential_01",
     "cooperative_potential_01",
@@ -150,6 +154,7 @@ def build_interval_signal_names(config):
         variable_id = variable_config["id"]
         _append_unique(signal_names, f"local_need_01_{variable_id}")
         _append_unique(signal_names, f"cooperative_weight_effective_{variable_id}")
+        _append_unique(signal_names, f"health_delta_signed_{variable_id}")
 
     if cooperative_config["reward_mode"] == "regime_residual":
         _append_unique(signal_names, cooperative_config["regime_residual_params"]["signal"])

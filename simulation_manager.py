@@ -45,6 +45,9 @@ class SimulationManager:
         self.steps_per_interval = max(1, int(round(self.decision_interval_sec / self.dt_sec)))
         self.termination_config = config["termination"]
         self.reason_codes = self.termination_config["reason_codes"]
+        stabilization_config = self.termination_config["stabilization"]
+        self.stabilization_mode = stabilization_config["mode"]
+        self.stabilization_persistence_sec = float(stabilization_config["persistence_sec"])
         self.reason_names_by_code = {}
         for reason_name, reason_code in self.reason_codes.items():
             self.reason_names_by_code[int(reason_code)] = reason_name
@@ -78,6 +81,7 @@ class SimulationManager:
 
         self.current_step_idx = 0
         self.current_interval_idx = 0
+        self.stabilization_steps = 0
         self.terminated = False
         self.termination_reason_code = int(self.reason_codes["none"])
 
@@ -92,6 +96,7 @@ class SimulationManager:
         self.termination_reason_code = int(self.reason_codes["none"])
         self.current_step_idx = 0
         self.current_interval_idx = 0
+        self.stabilization_steps = 0
 
         self.dynamic_system.reset_episode(0)
         self.controller_manager.reset_episode(0)
@@ -169,17 +174,28 @@ class SimulationManager:
             self.termination_reason_code = int(self.reason_codes["limit_exceeded"])
             return True
 
-        if (
+        inside_stabilization_bands = (
             float(stabilization["pendulum_angle"][0]) <= pendulum_angle <= float(stabilization["pendulum_angle"][1])
             and float(stabilization["pendulum_velocity"][0])
             <= pendulum_velocity
             <= float(stabilization["pendulum_velocity"][1])
             and float(stabilization["cart_position"][0]) <= cart_position <= float(stabilization["cart_position"][1])
             and float(stabilization["cart_velocity"][0]) <= cart_velocity <= float(stabilization["cart_velocity"][1])
-        ):
-            self.terminated = True
-            self.termination_reason_code = int(self.reason_codes["stabilization_success"])
-            return True
+        )
+        if inside_stabilization_bands:
+            if self.stabilization_mode == "instantaneous":
+                self.terminated = True
+                self.termination_reason_code = int(self.reason_codes["stabilization_success"])
+                return True
+            if self.stabilization_mode == "persistence":
+                self.stabilization_steps += 1
+                stabilization_elapsed_sec = self.stabilization_steps * self.dt_sec
+                if stabilization_elapsed_sec >= self.stabilization_persistence_sec:
+                    self.terminated = True
+                    self.termination_reason_code = int(self.reason_codes["stabilization_success"])
+                    return True
+        else:
+            self.stabilization_steps = 0
 
         if step_idx >= self.max_steps:
             self.terminated = True

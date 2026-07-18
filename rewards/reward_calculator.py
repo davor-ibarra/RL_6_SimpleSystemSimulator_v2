@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 
-SUPPORTED_COOPERATIVE_MODES = ("norm-p", "geometric_consensus")
+SUPPORTED_COOPERATIVE_MODES = ("norm-p", "geometric_consensus", "concurrent_progress")
 SUPPORTED_COOPERATIVE_REWARD_MODES = ("absolute", "progress", "progress_residual", "regime_residual")
 SUPPORTED_REGIME_REWARD_MODES = ("absolute", "progress", "progress_residual")
 
@@ -27,9 +27,9 @@ class LocalRewardTrack:
 @dataclass(frozen=True)
 class CooperativeVariableTrack:
     variable_id: str
-    potential_cost_array: object
+    potential_source_array: object
     need_cost_array: object
-    health_array: object
+    balance_health_array: object
     nominal_weight: float
     need_array: object
     effective_weight_array: object
@@ -81,9 +81,12 @@ class RewardCalculator:
         self.has_previous_cooperative_potential = False
         self.previous_variable_costs = {}
         self.previous_variable_needs = {}
+        self.previous_variable_healths = {}
+        self.has_previous_variable_healths = False
         for variable_track in self.cooperative_variables:
             self.previous_variable_costs[variable_track.variable_id] = 0.0
             self.previous_variable_needs[variable_track.variable_id] = 0.0
+            self.previous_variable_healths[variable_track.variable_id] = 0.0
 
         terminal_bonus_config = reward_config["terminal_learning_bonus"]
         self.terminal_bonus_enabled = bool(terminal_bonus_config["enabled"])
@@ -154,6 +157,7 @@ class RewardCalculator:
             raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
         self.cooperative_p = float(potential_config["p"])
         self.epsilon_geom_conc = float(potential_config["epsilon_geom_conc"])
+        self.deterioration_order = float(potential_config["deterioration_order"])
         self.residual_weight = float(cooperative_config["residual_weight"])
         if not np.isfinite(self.cooperative_p):
             raise ValueError("cooperative p must be finite")
@@ -169,14 +173,15 @@ class RewardCalculator:
             raise ValueError("cooperative residual_weight must be non-negative")
 
         adaptive_weights_config = cooperative_config["adaptive_weights"]
+        balance_config = cooperative_config["balance"]
         synchrony_config = cooperative_config["synchrony"]
         need_config_by_id = self.index_source_configs(
             adaptive_weights_config["need_variables"],
             "adaptive need",
         )
         health_config_by_id = self.index_source_configs(
-            synchrony_config["health_variables"],
-            "synchrony health",
+            balance_config["health_variables"],
+            "balance health",
         )
 
         potential_variable_configs = potential_config["variables"]
@@ -186,7 +191,7 @@ class RewardCalculator:
         if set(need_config_by_id) != potential_ids:
             raise ValueError("adaptive need variable ids must match cooperative potential variables exactly")
         if set(health_config_by_id) != potential_ids:
-            raise ValueError("synchrony health variable ids must match cooperative potential variables exactly")
+            raise ValueError("balance health variable ids must match cooperative potential variables exactly")
 
         self.cooperative_variables = []
         nominal_weight_sum = 0.0
@@ -201,9 +206,9 @@ class RewardCalculator:
             self.cooperative_variables.append(
                 CooperativeVariableTrack(
                     variable_id=variable_id,
-                    potential_cost_array=getattr(self.interval, variable_config["source"]),
+                    potential_source_array=getattr(self.interval, variable_config["source"]),
                     need_cost_array=getattr(self.interval, need_config_by_id[variable_id]["source"]),
-                    health_array=getattr(self.interval, health_config_by_id[variable_id]["source"]),
+                    balance_health_array=getattr(self.interval, health_config_by_id[variable_id]["source"]),
                     nominal_weight=nominal_weight,
                     need_array=getattr(self.interval, f"local_need_01_{variable_id}"),
                     effective_weight_array=getattr(
@@ -218,6 +223,7 @@ class RewardCalculator:
             raise ValueError("cooperative variable weights must sum to 1.0")
 
         self.configure_adaptive_weights(adaptive_weights_config)
+        self.configure_balance(balance_config)
         self.configure_synchrony(synchrony_config)
         self.configure_adaptive_residual(cooperative_config["adaptive_residual"])
         self.configure_regime_residual(cooperative_config)
@@ -240,13 +246,14 @@ class RewardCalculator:
         if self.smoothing_alpha < 0.0 or self.smoothing_alpha > 1.0:
             raise ValueError("adaptive_weights smoothing_alpha must be between 0 and 1")
 
+    def configure_balance(self, balance_config):
+        self.balance_enabled = bool(balance_config["enabled"])
+        self.balance_strength = float(balance_config["strength"])
+
     def configure_synchrony(self, synchrony_config):
         self.synchrony_enabled = bool(synchrony_config["enabled"])
+        self.synchrony_source_array = getattr(self.interval, synchrony_config["source"])
         self.synchrony_strength = float(synchrony_config["strength"])
-        if not np.isfinite(self.synchrony_strength):
-            raise ValueError("synchrony strength must be finite")
-        if self.synchrony_strength < 0.0:
-            raise ValueError("synchrony strength must be non-negative")
 
     def configure_adaptive_residual(self, adaptive_residual_config):
         self.adaptive_residual_enabled = bool(adaptive_residual_config["enabled"])
@@ -356,9 +363,11 @@ class RewardCalculator:
         self.terminal_bonus = 0.0
         self.previous_cooperative_potential = 0.0
         self.has_previous_cooperative_potential = False
+        self.has_previous_variable_healths = False
         for variable_track in self.cooperative_variables:
             self.previous_variable_costs[variable_track.variable_id] = 0.0
             self.previous_variable_needs[variable_track.variable_id] = 0.0
+            self.previous_variable_healths[variable_track.variable_id] = 0.0
 
     def evaluate_interval(self, interval_idx):
         self.terminal_learning_bonus(interval_idx)
@@ -383,8 +392,18 @@ class RewardCalculator:
         effective_weights = self.compute_effective_cooperative_weights()
         self.write_effective_cooperative_weights(interval_idx, effective_weights)
         if self.cooperative_enabled:
-            cooperative_potential_base = self.compute_cooperative_potential_base(interval_idx, effective_weights)
-            synchrony_health_balance, synchrony_factor, cooperative_potential = self.compute_collective_potential(
+            (
+                cooperative_potential_base,
+                cooperative_positive_progress,
+                cooperative_deterioration,
+                cooperative_progress_signed,
+            ) = self.compute_cooperative_potential_base(interval_idx, effective_weights)
+            (
+                health_balance,
+                balance_factor,
+                synchrony_factor,
+                cooperative_potential,
+            ) = self.compute_collective_potential(
                 interval_idx,
                 cooperative_potential_base,
                 effective_weights,
@@ -394,7 +413,11 @@ class RewardCalculator:
             cooperative_regime = self.compute_cooperative_regime(cooperative_potential)
         else:
             cooperative_potential_base = 1.0
-            synchrony_health_balance = 1.0
+            cooperative_positive_progress = 0.0
+            cooperative_deterioration = 0.0
+            cooperative_progress_signed = 0.0
+            health_balance = 1.0
+            balance_factor = 1.0
             synchrony_factor = 1.0
             cooperative_potential = 1.0
             cooperative_cost = 0.0
@@ -424,8 +447,12 @@ class RewardCalculator:
             cooperative_reward = 0.0
 
         self.interval.cooperative_cost_01[interval_idx] = cooperative_cost
+        self.interval.cooperative_positive_progress_01[interval_idx] = cooperative_positive_progress
+        self.interval.cooperative_deterioration_01[interval_idx] = cooperative_deterioration
+        self.interval.cooperative_progress_signed[interval_idx] = cooperative_progress_signed
         self.interval.cooperative_potential_base_01[interval_idx] = cooperative_potential_base
-        self.interval.synchrony_health_balance_01[interval_idx] = synchrony_health_balance
+        self.interval.health_balance_01[interval_idx] = health_balance
+        self.interval.balance_factor_01[interval_idx] = balance_factor
         self.interval.synchrony_factor_01[interval_idx] = synchrony_factor
         self.interval.delta_cooperative_potential_signed[interval_idx] = delta_cooperative_potential
         self.interval.cooperative_progress_residual_signed[interval_idx] = cooperative_progress_residual
@@ -441,21 +468,24 @@ class RewardCalculator:
 
     def compute_cooperative_potential(self, interval_idx):
         effective_weights = self.compute_effective_cooperative_weights()
-        cooperative_potential_base = self.compute_cooperative_potential_base(interval_idx, effective_weights)
-        return self.compute_collective_potential(interval_idx, cooperative_potential_base, effective_weights)[2]
+        cooperative_potential_base = self.compute_cooperative_potential_base(interval_idx, effective_weights)[0]
+        return self.compute_collective_potential(interval_idx, cooperative_potential_base, effective_weights)[3]
 
     def compute_cooperative_potential_base(self, interval_idx, effective_weights):
         if self.cooperative_mode == "norm-p":
             cooperative_cost = self.compute_norm_p_cooperative_cost(interval_idx, effective_weights)
-            return _clip_01(1.0 - cooperative_cost)
+            return _clip_01(1.0 - cooperative_cost), 0.0, 0.0, 0.0
         if self.cooperative_mode == "geometric_consensus":
-            return self.compute_geometric_consensus_potential(interval_idx, effective_weights)
+            cooperative_potential = self.compute_geometric_consensus_potential(interval_idx, effective_weights)
+            return cooperative_potential, 0.0, 0.0, 0.0
+        if self.cooperative_mode == "concurrent_progress":
+            return self.compute_concurrent_progress_potential(interval_idx, effective_weights)
         raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
 
     def compute_norm_p_cooperative_cost(self, interval_idx, effective_weights):
         cooperative_cost_power = 0.0
         for variable_track in self.cooperative_variables:
-            variable_cost = _clip_01(float(variable_track.potential_cost_array[interval_idx]))
+            variable_cost = _clip_01(float(variable_track.potential_source_array[interval_idx]))
             cooperative_cost_power += effective_weights[variable_track.variable_id] * (
                 variable_cost ** self.cooperative_p
             )
@@ -464,26 +494,95 @@ class RewardCalculator:
     def compute_geometric_consensus_potential(self, interval_idx, effective_weights):
         log_potential = 0.0
         for variable_track in self.cooperative_variables:
-            variable_cost = _clip_01(float(variable_track.potential_cost_array[interval_idx]))
+            variable_cost = _clip_01(float(variable_track.potential_source_array[interval_idx]))
             variable_health = max(self.epsilon_geom_conc, 1.0 - variable_cost)
             log_potential += effective_weights[variable_track.variable_id] * np.log(variable_health)
         return _clip_01(float(np.exp(log_potential)))
 
-    def compute_collective_potential(self, interval_idx, cooperative_potential_base, effective_weights):
-        if not self.synchrony_enabled:
-            return 1.0, 1.0, cooperative_potential_base
+    def compute_concurrent_progress_potential(self, interval_idx, effective_weights):
+        current_healths = {}
+        for variable_track in self.cooperative_variables:
+            variable_id = variable_track.variable_id
+            current_healths[variable_id] = _clip_01(
+                float(variable_track.potential_source_array[interval_idx])
+            )
 
+        if not self.has_previous_variable_healths:
+            for variable_track in self.cooperative_variables:
+                variable_id = variable_track.variable_id
+                getattr(self.interval, f"health_delta_signed_{variable_id}")[interval_idx] = 0.0
+                self.previous_variable_healths[variable_id] = current_healths[variable_id]
+            self.has_previous_variable_healths = True
+            return 0.5, 0.0, 0.0, 0.0
+
+        positive_progress = 1.0
+        all_variables_improve = True
+        deterioration_power = 0.0
+        for variable_track in self.cooperative_variables:
+            variable_id = variable_track.variable_id
+            health_delta = current_healths[variable_id] - self.previous_variable_healths[variable_id]
+            getattr(self.interval, f"health_delta_signed_{variable_id}")[interval_idx] = health_delta
+
+            variable_progress = max(health_delta, 0.0)
+            variable_deterioration = max(-health_delta, 0.0)
+            if variable_progress == 0.0:
+                all_variables_improve = False
+            variable_weight = effective_weights[variable_id]
+            positive_progress *= variable_progress ** variable_weight
+            deterioration_power += variable_weight * (
+                variable_deterioration ** self.deterioration_order
+            )
+            self.previous_variable_healths[variable_id] = current_healths[variable_id]
+
+        if not all_variables_improve:
+            positive_progress = 0.0
+        cooperative_deterioration = deterioration_power ** (1.0 / self.deterioration_order)
+        cooperative_progress = positive_progress - cooperative_deterioration
+        cooperative_potential = 0.5 * (cooperative_progress + 1.0)
+        return (
+            _clip_01(float(cooperative_potential)),
+            _clip_01(float(positive_progress)),
+            _clip_01(float(cooperative_deterioration)),
+            _clip_signed(float(cooperative_progress)),
+        )
+
+    def compute_collective_potential(self, interval_idx, cooperative_potential_base, effective_weights):
+        health_balance, balance_factor = self.compute_health_balance(interval_idx, effective_weights)
+        synchrony_factor = self.compute_synchrony_factor(interval_idx)
+        collective_potential = _clip_01(
+            float(cooperative_potential_base * balance_factor * synchrony_factor)
+        )
+        return health_balance, balance_factor, synchrony_factor, collective_potential
+
+    def compute_health_balance(self, interval_idx, effective_weights):
+        if not self.balance_enabled:
+            return 1.0, 1.0
+
+        geometric_health = 1.0
         arithmetic_health = 0.0
         for variable_track in self.cooperative_variables:
-            variable_health = max(
-                self.epsilon_geom_conc,
-                _clip_01(float(variable_track.health_array[interval_idx])),
-            )
-            arithmetic_health += effective_weights[variable_track.variable_id] * variable_health
-        synchrony_health_balance = _clip_01(float(cooperative_potential_base / arithmetic_health))
-        synchrony_factor = _clip_01(float(synchrony_health_balance ** self.synchrony_strength))
-        collective_potential = _clip_01(float(cooperative_potential_base * synchrony_factor))
-        return synchrony_health_balance, synchrony_factor, collective_potential
+            variable_health = _clip_01(float(variable_track.balance_health_array[interval_idx]))
+            variable_weight = effective_weights[variable_track.variable_id]
+            geometric_health *= variable_health ** variable_weight
+            arithmetic_health += variable_weight * variable_health
+
+        if arithmetic_health == 0.0:
+            health_balance = 1.0
+        else:
+            health_balance = _clip_01(float(geometric_health / arithmetic_health))
+        if self.balance_strength == 0.0:
+            balance_factor = 1.0
+        else:
+            balance_factor = _clip_01(float(health_balance ** self.balance_strength))
+        return health_balance, balance_factor
+
+    def compute_synchrony_factor(self, interval_idx):
+        if not self.synchrony_enabled:
+            return 1.0
+        if self.synchrony_strength == 0.0:
+            return 1.0
+        synchrony = _clip_01(float(self.synchrony_source_array[interval_idx]))
+        return _clip_01(float(synchrony ** self.synchrony_strength))
 
     def compute_effective_cooperative_weights(self):
         if not self.adaptive_weights_enabled:

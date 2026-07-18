@@ -135,14 +135,14 @@ data_summary:
       stats: [mean, std, min, p25, p50, p75, max]
     - source: cost_01_delta_u_total_abs
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: raw_cost_error_pendulum_angle_abs_median
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_01_error_pendulum_angle_abs_median_robust
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: raw_cost_error_cart_position_abs_median
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_01_error_cart_position_abs_median_robust
-      stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_error_pendulum_angle_abs_median
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_pendulum_angle_abs_median_robust
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_error_cart_position_abs_median
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_cart_position_abs_median_robust
+    #   stats: [mean, std, min, p25, p50, p75, max]
     - source: local_cost_01_pendulum_angle
       stats: [mean, min, p25, p50, p75, max]
     - source: local_health_01_pendulum_angle

@@ -106,13 +106,13 @@ Una modificacion que cruce estas fronteras debe justificarse por una necesidad c
 
 ## Regla 7: reward interpretable
 
-Toda metrica usada por la recompensa debe ser un costo normalizado en $[0,1]$. Toda recompensa final debe permanecer en $[-1,1]$. La transformacion canonica es:
+Toda fuente usada por la recompensa debe ser una magnitud normalizada en $[0,1]$ con orientacion explicita de costo, salud o alineacion. Toda recompensa ordinaria final debe permanecer en $[-1,1]$. Para una fuente de costo, la transformacion canonica es:
 
 $$
 r = 1 - 2c.
 $$
 
-La recompensa local debe depender de costos normalizados declarados para su lazo, como error y variacion de esfuerzo asignado. La cooperacion debe declarar explicitamente y por separado las fuentes del potencial, de la necesidad adaptativa, de la salud de sincronizacion y del residual adaptativo. Las salidas de recompensa deben conservar nombres canonicos y no formar parte de la experimentacion declarativa. Los modos de potencial admitidos son `norm-p` y `geometric_consensus`; los modos de recompensa cooperativa admitidos son `absolute`, `progress`, `progress_residual` y `regime_residual`. La ruta `norm-p` + `absolute` debe conservar compatibilidad numerica con la transformacion canonica $r=1-2c$. La memoria temporal cooperativa debe permanecer dentro de `RewardCalculator` y reiniciarse por episodio. La recompensa estrategica solo puede activarse si existe una implementacion explicita y verificable.
+La recompensa local debe depender de costos normalizados declarados para su lazo, como error y variacion de esfuerzo asignado. La cooperacion debe declarar explicitamente y por separado las fuentes del potencial, de la necesidad adaptativa, de la salud de balance, de la sincronizacion temporal y del residual adaptativo. Las salidas de recompensa deben conservar nombres canonicos y no formar parte de la experimentacion declarativa. Los modos de potencial admitidos son `norm-p`, `geometric_consensus` y `concurrent_progress`; los modos de recompensa cooperativa admitidos son `absolute`, `progress`, `progress_residual` y `regime_residual`. La ruta `norm-p` + `absolute` debe conservar compatibilidad numerica con la transformacion canonica $r=1-2c$, mientras que `concurrent_progress` + `absolute` con factores neutros debe reproducir su senal firmada de progreso concurrente. La memoria temporal cooperativa debe permanecer dentro de `RewardCalculator` y reiniciarse por episodio. La memoria de `oriented_rate_alignment` pertenece a `MetricProcessor` y tambien se reinicia por episodio. La recompensa estrategica solo puede activarse si existe una implementacion explicita y verificable.
 
 ## Regla 8: aprendizaje sin contexto oculto
 

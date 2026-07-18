@@ -29,10 +29,11 @@ Por tanto, lo configurable no es como se llama `cooperative_potential_01`, sino 
 
 - el potencial cooperativo;
 - la necesidad de los pesos adaptativos;
-- la salud usada por la sincronizacion;
+- la salud usada por el balance;
+- la alineacion temporal usada por la sincronizacion;
 - el peso residual adaptativo.
 
-Estas cuatro representaciones pueden usar fuentes diferentes.
+Estas cinco representaciones pueden usar fuentes diferentes.
 
 ## Flujo causal
 
@@ -48,8 +49,10 @@ flowchart LR
     P --> CP["Potencial cooperativo"]
     N --> W["Pesos efectivos"]
     W --> CP
-    H --> S["Sincronizacion"]
-    CP --> S
+    H --> B["Balance"]
+    CP --> B
+    M --> S["Sincronizacion temporal"]
+    B --> S
     S --> AR["Residual adaptativo"]
     M --> AR
     AR --> CR["Recompensa cooperativa"]
@@ -64,11 +67,12 @@ El orden de ejecucion por intervalo es:
 2. Se calculan los costos, salud y recompensas locales.
 3. Se recuperan los pesos efectivos derivados de la necesidad del intervalo anterior.
 4. Se calcula el potencial base con `potential.variables`.
-5. Se aplica la sincronizacion con `synchrony.health_variables`.
-6. Se calcula el peso residual desde `adaptive_residual.source`.
-7. Se transforma el potencial en recompensa cooperativa.
-8. Se actualizan las necesidades actuales desde `adaptive_weights.need_variables` para el intervalo siguiente.
-9. Se componen y asignan las recompensas finales.
+5. Se aplica el balance con `balance.health_variables`.
+6. Se aplica la sincronizacion desde `synchrony.source`.
+7. Se calcula el peso residual desde `adaptive_residual.source`.
+8. Se transforma el potencial en recompensa cooperativa.
+9. Se actualizan las necesidades actuales desde `adaptive_weights.need_variables` para el intervalo siguiente.
+10. Se componen y asignan las recompensas finales.
 
 ## Dominios semanticos
 
@@ -77,13 +81,14 @@ Cada rama interpreta su `source` de una manera concreta:
 | Rama | Dominio | Interpretacion |
 |---|---:|---|
 | `local.components[].cost` | `[0,1]` | Costo: `0` es mejor y `1` es peor. |
-| `potential.variables[].source` | `[0,1]` | Costo cooperativo: `0` es mejor y `1` es peor. |
+| `potential.variables[].source` | `[0,1]` | Costo en `norm-p` y `geometric_consensus`; salud en `concurrent_progress`. |
 | `adaptive_weights.need_variables[].source` | `[0,1]` | Costo o necesidad: valores altos demandan mas peso. |
-| `synchrony.health_variables[].source` | `[0,1]` | Salud: `1` es mejor y `0` es peor. |
+| `balance.health_variables[].source` | `[0,1]` | Salud: `1` es mejor y `0` es peor. |
+| `synchrony.source` | `[0,1]` | Alineacion temporal: `1` es evolucion sincronizada. |
 | `adaptive_residual.source` | `[0,1]` | Calidad: valores altos aumentan el peso residual segun `gamma`. |
 
 > [!warning]
-> Una salud no debe conectarse directamente como costo del potencial. Tampoco debe conectarse un costo directamente como salud de sincronizacion, salvo que esa inversion semantica sea deliberada.
+> La orientacion de `potential.variables[].source` depende del metodo. `concurrent_progress` requiere salud; los otros dos metodos requieren costo.
 
 ## Configuracion vigente
 
@@ -96,19 +101,20 @@ cooperative:
   residual_weight: 0.1
 
   potential:
-    method: norm-p
+    method: concurrent_progress
     p: 1.0
     epsilon_geom_conc: 1.0e-8
+    deterioration_order: 2.0
     variables:
       - id: pendulum_angle
-        source: local_cost_01_pendulum_angle
+        source: local_health_01_pendulum_angle
         weight: 0.6
       - id: cart_position
-        source: local_cost_01_cart_position
+        source: local_health_01_cart_position
         weight: 0.4
 
   adaptive_weights:
-    enabled: true
+    enabled: false
     weight_floor: 0.2
     deterioration_weight: 0.2
     smoothing_alpha: 0.0
@@ -118,8 +124,8 @@ cooperative:
       - id: cart_position
         source: local_cost_01_cart_position
 
-  synchrony:
-    enabled: true
+  balance:
+    enabled: false
     strength: 0.2
     health_variables:
       - id: pendulum_angle
@@ -127,22 +133,26 @@ cooperative:
       - id: cart_position
         source: local_health_01_cart_position
 
+  synchrony:
+    enabled: false
+    source: evolution_alignment_01
+    strength: 0.2
+
   adaptive_residual:
-    enabled: true
+    enabled: false
     source: cooperative_potential_01
     residual_weight_min: 0.02
     residual_weight_max: 0.1
     gamma: 2.0
 ```
 
-Esta declaracion reproduce numericamente el comportamiento previo a la refactorizacion:
+Esta declaracion activa la construccion de progreso concurrente sin alterar por defecto el potencial mediante factores opcionales:
 
-- el potencial usa los costos locales;
-- la necesidad adaptativa usa esos mismos costos;
-- la sincronizacion usa su salud complementaria;
+- el potencial usa las saludes locales;
+- la necesidad adaptativa conserva fuentes de costo independientes;
+- el balance queda neutro;
+- la sincronizacion queda neutra, aunque su metrica se calcula y persiste;
 - el residual adaptativo usa el potencial cooperativo final.
-
-La diferencia es que esas coincidencias ahora son explicitas y pueden romperse intencionalmente.
 
 ## Recompensa local
 
@@ -211,14 +221,15 @@ Esto cambia la recompensa local. No obliga a cambiar la cooperacion, porque cada
 Metodos disponibles:
 
 - `norm-p`;
-- `geometric_consensus`.
+- `geometric_consensus`;
+- `concurrent_progress`.
 
 ### `potential.variables`
 
 Cada variable declara:
 
-- `id`: identidad comun que permite relacionarla con necesidad y salud;
-- `source`: costo normalizado usado por el potencial;
+- `id`: identidad comun que permite relacionarla con necesidad y balance;
+- `source`: costo normalizado para `norm-p` y `geometric_consensus`, o salud normalizada para `concurrent_progress`;
 - `weight`: peso nominal.
 
 Los pesos nominales deben ser no negativos y sumar `1.0`.
@@ -245,6 +256,28 @@ $$
 \right).
 $$
 
+### `concurrent_progress`
+
+Cada fuente es una salud $h_i\in[0,1]$. Entre intervalos consecutivos se calcula:
+
+$$
+\delta_i=h_{i,t}-h_{i,t-1},
+\qquad
+P=\prod_i[\delta_i]_+^{\lambda_i},
+$$
+
+$$
+D=\left(\sum_i\lambda_i[-\delta_i]_+^{q_d}\right)^{1/q_d},
+\qquad
+q^{CP}=P-D,
+$$
+
+$$
+\Phi^{base}=\frac{q^{CP}+1}{2}.
+$$
+
+`deterioration_order` declara $q_d$. Si alguna variable no mejora, $P=0$. El primer intervalo produce $q^{CP}=0$ y $\Phi^{base}=0.5$.
+
 ### Ejemplo: cambiar solo el potencial
 
 ```yaml
@@ -252,6 +285,7 @@ potential:
   method: norm-p
   p: 2.0
   epsilon_geom_conc: 1.0e-8
+  deterioration_order: 2.0
   variables:
     - id: pendulum_angle
       source: cost_01_error_pendulum_angle_rms
@@ -261,7 +295,7 @@ potential:
       weight: 0.4
 ```
 
-La necesidad adaptativa y la sincronizacion continuaran usando sus propias fuentes, sin verse alteradas.
+La necesidad adaptativa, el balance y la sincronizacion continuaran usando sus propias fuentes, sin verse alteradas.
 
 ## Pesos adaptativos
 
@@ -329,63 +363,62 @@ adaptive_weights:
 
 El potencial puede continuar usando `local_cost_01_*` mientras la asignacion adaptativa responde al RMS.
 
-## Sincronizacion
+## Balance
 
-### `synchrony.health_variables`
+### `balance.health_variables`
 
-Estas fuentes se interpretan directamente como salud en `[0,1]`:
-
-- `0`: mala salud;
-- `1`: buena salud.
-
-Los `id` deben coincidir exactamente con `potential.variables` para aplicar los mismos pesos efectivos.
-
-La salud aritmetica es:
+Estas fuentes se interpretan directamente como salud en `[0,1]` y sus `id` coinciden con `potential.variables` para reutilizar los pesos efectivos. El balance compara las medias geometrica y aritmetica:
 
 $$
-A_t=\sum_i\lambda^{eff}_{i,t}h^{sync}_{i,t}.
+G_H=\prod_i h_i^{\lambda_i},
+\qquad
+A_H=\sum_i\lambda_i h_i,
+\qquad
+B=\frac{G_H}{A_H}.
 $$
 
-Luego:
-
-$$
-B_t=\operatorname{clip}_{[0,1]}
-\left(\frac{\Phi_t^{base}}{A_t}\right),
-$$
-
-$$
-S_t=B_t^{strength},
-$$
-
-$$
-\Phi_t=\Phi_t^{base}S_t.
-$$
-
-### Como hacer que `health` sea otra variable
-
-Esta es la rama que debe modificarse:
+Cuando $A_H=0$, se define $B=1$. El factor es $F_B=B^{strength}$ y vale uno si `strength: 0.0` o si el subcomponente esta desactivado.
 
 ```yaml
-synchrony:
+balance:
   enabled: true
   strength: 0.2
   health_variables:
     - id: pendulum_angle
-      source: mi_salud_pendulum_01
+      source: local_health_01_pendulum_angle
     - id: cart_position
-      source: mi_salud_cart_01
+      source: local_health_01_cart_position
 ```
 
-No es necesario que `mi_salud_*` sea `1 - local_cost`. Puede ser cualquier metrica existente que represente salud en `[0,1]`.
+## Sincronizacion temporal
 
-Por ejemplo, una futura metrica puede representar:
+`synchrony` ya no calcula el balance. Consume una unica metrica intervalar normalizada y construye $F_S=S^{strength}$:
 
-- margen respecto de limites fisicos;
-- estabilidad conjunta de error y velocidad;
-- disponibilidad de esfuerzo de control;
-- consenso entre varias condiciones operativas.
+```yaml
+synchrony:
+  enabled: true
+  source: evolution_alignment_01
+  strength: 0.2
+```
 
-El requisito es que la metrica exista antes de evaluar la recompensa y mantenga la orientacion `1 = saludable`.
+La metrica se declara con varias fuentes despues de las metricas que consume:
+
+```yaml
+- sources:
+    - cost_01_error_pendulum_angle_rms
+    - cost_01_error_cart_position_rms
+  sample_transform: {method: identity}
+  interval_reduce:
+    method: oriented_rate_alignment
+    objective: minimize
+    epsilon: 1.0e-12
+  post_transform: {method: none}
+  raw_target: raw_evolution_alignment
+  scaler: {method: bound, mode: positive, bound: 1.0, clip: true}
+  target: evolution_alignment_01
+```
+
+`MetricProcessor` conserva por episodio los valores anteriores de todas las fuentes. El primer intervalo produce sincronizacion igual a uno.
 
 ## Residual adaptativo
 
@@ -514,6 +547,7 @@ cooperative:
     method: norm-p
     p: 2.0
     epsilon_geom_conc: 1.0e-8
+    deterioration_order: 2.0
     variables:
       - id: pendulum_angle
         source: cost_01_error_pendulum_angle_rms
@@ -533,7 +567,7 @@ cooperative:
       - id: cart_position
         source: cost_01_delta_error_cart_position
 
-  synchrony:
+  balance:
     enabled: true
     strength: 0.2
     health_variables:
@@ -541,6 +575,11 @@ cooperative:
         source: mi_salud_dinamica_pendulum_01
       - id: cart_position
         source: mi_salud_dinamica_cart_01
+
+  synchrony:
+    enabled: true
+    source: evolution_alignment_01
+    strength: 0.2
 
   adaptive_residual:
     enabled: true
@@ -554,7 +593,8 @@ En este ejemplo:
 
 - el potencial representa amplitud RMS;
 - la atencion adaptativa responde al cambio del error;
-- la sincronizacion usa una salud dinamica distinta;
+- el balance usa una salud dinamica distinta;
+- la sincronizacion consume la alineacion de evolucion;
 - el residual responde a una metrica de confianza.
 
 ## Agregar una nueva identidad cooperativa
@@ -573,7 +613,7 @@ adaptive_weights:
     - id: actuator
       source: cost_01_delta_u_total_abs
 
-synchrony:
+balance:
   health_variables:
     - id: actuator
       source: actuator_health_01
@@ -598,9 +638,14 @@ Estas senales no se renombran desde `reward`:
 
 | Senal | Significado |
 |---|---|
-| `cooperative_potential_base_01` | Potencial antes de sincronizacion. |
-| `synchrony_health_balance_01` | Relacion entre potencial base y salud ponderada. |
-| `synchrony_factor_01` | Factor aplicado por sincronizacion. |
+| `cooperative_positive_progress_01` | Progreso positivo concurrente $P$. |
+| `cooperative_deterioration_01` | Deterioro cooperativo $D$. |
+| `cooperative_progress_signed` | Senal $P-D$ de `concurrent_progress`. |
+| `health_delta_signed_<id>` | Cambio intervalar de salud de cada variable. |
+| `cooperative_potential_base_01` | Potencial antes de balance y sincronizacion. |
+| `health_balance_01` | Relacion entre medias geometrica y aritmetica de salud. |
+| `balance_factor_01` | Factor aplicado por balance. |
+| `synchrony_factor_01` | Factor temporal aplicado por sincronizacion. |
 | `collective_potential_01` | Potencial colectivo final. |
 | `cooperative_potential_01` | Potencial cooperativo final usado por consumidores existentes. |
 | `cooperative_cost_01` | `1 - cooperative_potential`. |
@@ -627,7 +672,8 @@ Una nueva metrica usada como `source` debe existir antes de `RewardCalculator`. 
 - Componentes y pesos del costo local.
 - Metodo, `p`, fuentes y pesos del potencial.
 - Fuentes de necesidad adaptativa.
-- Fuentes de salud de sincronizacion.
+- Fuentes de salud de balance.
+- Fuente y fuerza de sincronizacion.
 - Fuente, limites y `gamma` del residual adaptativo.
 - Modo de recompensa cooperativa.
 - Pesos de composicion local/cooperativa.
@@ -636,9 +682,9 @@ Una nueva metrica usada como `source` debe existir antes de `RewardCalculator`. 
 
 ## Que sigue siendo una extension de codigo
 
-- Nuevas formulas de potencial distintas de `norm-p` y `geometric_consensus`.
+- Nuevas formulas de potencial distintas de `norm-p`, `geometric_consensus` y `concurrent_progress`.
 - Nuevas formulas de necesidad adaptativa.
-- Nuevas formulas de sincronizacion.
+- Nuevas formulas de balance o sincronizacion.
 - Hacer que `regime_residual` use una fuente distinta del potencial.
 - Reducciones globales distintas del promedio.
 - Recompensa estrategica.
@@ -646,11 +692,11 @@ Una nueva metrica usada como `source` debe existir antes de `RewardCalculator`. 
 
 ## Checklist experimental
 
-- [ ] Cada `source` existe como senal de intervalo.
+- [ ] Cada `source` y cada entrada de `sources` existe como senal de intervalo.
 - [ ] Cada fuente respeta el dominio y orientacion de su rama.
 - [ ] Los pesos locales suman `1.0`.
 - [ ] Los pesos del potencial suman `1.0`.
-- [ ] Los `id` de potencial, necesidad y salud coinciden exactamente.
+- [ ] Los `id` de potencial, necesidad y balance coinciden exactamente.
 - [ ] `weight_floor <= 1/N`.
 - [ ] Los pesos de composicion suman `1.0`.
 - [ ] Las nuevas metricas que deben guardarse aparecen en `output_schema`.
@@ -661,4 +707,3 @@ Una nueva metrica usada como `source` debe existir antes de `RewardCalculator`. 
 - [[00_declaracion_descriptiva_general]]
 - [[01_declaracion_especifica_sistema]]
 - [[02_manifiesto_reglas_codificacion]]
-

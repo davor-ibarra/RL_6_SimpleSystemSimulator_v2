@@ -11,6 +11,8 @@
       "pendulum_angle": [-1.0472, 1.0472]
     },
     "stabilization": {
+      "mode": "persistence",                       # "instantaneous" | "persistence"
+      "persistence_sec": 0.1,
       "pendulum_angle": [-0.02, 0.02],
       "pendulum_velocity": [-0.05, 0.05],
       "cart_position": [-0.1, 0.1],
@@ -139,7 +141,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "metric_error_pendulum_angle_mean_abs_norm",
-        "scaler": {"method": "bound", "mode":"positive", "bound": 0.2, "clip":true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
         "target": "cost_01_error_pendulum_angle_operating"
       },
       {
@@ -148,7 +150,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "metric_error_cart_position_mean_abs_norm",
-        "scaler": {"method": "bound", "mode":"positive", "bound": 0.2, "clip":true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
         "target": "cost_01_error_cart_position_operating"
       },
       {
@@ -157,7 +159,7 @@
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_error_pendulum_angle_rms",
-        "scaler": {"method": "minmax", "range": [0.0, 2.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
         "target": "cost_01_error_pendulum_angle_rms"
       },
       {
@@ -166,7 +168,7 @@
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_error_cart_position_rms",
-        "scaler": {"method": "minmax", "range": [0.0, 2.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
         "target": "cost_01_error_cart_position_rms"
       },
       {
@@ -175,7 +177,7 @@
         "interval_reduce": {"method": "last_minus_first", "audit_target": "delta_error_pendulum_angle"},
         "post_transform": {"method": "abs", "audit_target": "abs_delta_error_pendulum_angle"},
         "raw_target": "raw_cost_delta_error_pendulum_angle",
-        "scaler": {"method": "minmax", "range": [0.0, 4.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.05, "clip": true},
         "target": "cost_01_delta_error_pendulum_angle"
       },
       {
@@ -184,8 +186,44 @@
         "interval_reduce": {"method": "last_minus_first", "audit_target": "delta_error_cart_position"},
         "post_transform": {"method": "abs", "audit_target": "abs_delta_error_cart_position"},
         "raw_target": "raw_cost_delta_error_cart_position",
-        "scaler": {"method": "minmax", "range": [0.0, 4.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.03, "clip": true},
         "target": "cost_01_delta_error_cart_position"
+      },
+      {
+        "source": "error_pendulum_angle_norm",
+        "sample_transform": {"method": "square"},
+        "interval_reduce": {"method": "sum"},
+        "post_transform": {"method": "none"},
+        "raw_target": "raw_cost_error_pendulum_angle_sum_square",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 20.0, "clip": true},
+        "target": "cost_error_pendulum_angle_sum_square"
+      },
+      {
+        "source": "error_cart_position_norm",
+        "sample_transform": {"method": "square"},
+        "interval_reduce": {"method": "sum"},
+        "post_transform": {"method": "none"},
+        "raw_target": "raw_cost_error_cart_position_sum_square",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 20.0, "clip": true},
+        "target": "cost_error_cart_position_sum_square"
+      },
+      {
+        "source": "error_pendulum_angle_norm",
+        "sample_transform": {"method": "asinh", "scale": 1.0},
+        "interval_reduce": {"method": "rms"},
+        "post_transform": {"method": "none"},
+        "raw_target": "raw_cost_error_pendulum_angle_asinh_rms",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
+        "target": "cost_error_pendulum_angle_asinh_rms"
+      },
+      {
+        "source": "error_cart_position_norm",
+        "sample_transform": {"method": "asinh", "scale": 1.0},
+        "interval_reduce": {"method": "rms"},
+        "post_transform": {"method": "none"},
+        "raw_target": "raw_cost_error_cart_position_asinh_rms",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
+        "target": "cost_error_cart_position_asinh_rms"
       },
       {
         "source": "error_pendulum_angle_norm",
@@ -193,7 +231,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_memory_pendulum_angle",
-        "scaler": {"method": "minmax", "range": [0.0, 2.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
         "target": "cost_01_memory_pendulum_angle"
       },
       {
@@ -202,7 +240,7 @@
         "interval_reduce": {"method": "mean"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_memory_cart_position",
-        "scaler": {"method": "minmax", "range": [0.0, 2.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
         "target": "cost_01_memory_cart_position"
       },
       {
@@ -211,7 +249,7 @@
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_derivative_error_pendulum_angle_asinh_rms",
-        "scaler": {"method": "bound", "bound": 1.0, "mode": "positive", "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.6, "clip": true},
         "target": "cost_01_derivative_error_pendulum_angle_asinh_rms"
       },
       {
@@ -220,7 +258,7 @@
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_derivative_error_cart_position_asinh_rms",
-        "scaler": {"method": "bound", "bound": 1.0, "mode": "positive", "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.1, "clip": true},
         "target": "cost_01_derivative_error_cart_position_asinh_rms"
       },
       {
@@ -229,7 +267,7 @@
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_u_total_rms",
-        "scaler": {"method": "minmax", "range": [0.0, 1.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
         "target": "cost_01_u_total_rms"
       },
       {
@@ -238,7 +276,7 @@
         "interval_reduce": {"method": "last_minus_first", "audit_target": "delta_u_total_interval"},
         "post_transform": {"method": "abs"},
         "raw_target": "raw_cost_delta_u_total_abs",
-        "scaler": {"method": "minmax", "range": [0.0, 2.0], "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.12, "clip": true},
         "target": "cost_01_delta_u_total_abs"
       },
       {
@@ -254,7 +292,7 @@
         },
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_error_pendulum_angle_abs_median",
-        "scaler": {"method": "robust", "median": 0.0, "iqr": 1.0, "z_limit": 3.0, "epsilon": 1.0e-12, "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
         "target": "cost_01_error_pendulum_angle_abs_median_robust"
       },
       {
@@ -270,8 +308,24 @@
         },
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_error_cart_position_abs_median",
-        "scaler": {"method": "robust", "median": 0.0, "iqr": 1.0, "z_limit": 3.0, "epsilon": 1.0e-12, "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
         "target": "cost_01_error_cart_position_abs_median_robust"
+      },
+      {
+        "sources": [
+          "cost_01_error_pendulum_angle_rms",
+          "cost_01_error_cart_position_rms"
+        ],
+        "sample_transform": {"method": "identity"},
+        "interval_reduce": {
+          "method": "oriented_rate_alignment",
+          "objective": "minimize",
+          "epsilon": 1.0e-12
+        },
+        "post_transform": {"method": "none"},
+        "raw_target": "raw_evolution_alignment",
+        "scaler": {"method": "minmax", "range": [0.0, 1.0], "clip": true},
+        "target": "evolution_alignment_01"
       }
     ]
   },
@@ -280,8 +334,8 @@
     "domain": "signed_unit",
     "composition": {
       "weights": {
-        "local": 0.5,
-        "cooperative": 0.5,
+        "local": 1.0,
+        "cooperative": 0.0,
         "strategic": 0.0
       }
     },
@@ -290,8 +344,11 @@
         {
           "controller": "pendulum_angle",
           "components": [
-            {"cost": "cost_01_error_pendulum_angle_operating", "weight": 1.0},
+            {"cost": "cost_01_error_pendulum_angle_operating", "weight": 0.0},
             {"cost": "cost_01_error_pendulum_angle_rms", "weight": 0.0},
+            {"cost": "cost_error_pendulum_angle_sum_square", "weight": 1.0},
+            {"cost": "cost_error_pendulum_angle_asinh_rms", "weight": 0.0},
+            {"cost": "cost_01_delta_error_pendulum_angle", "weight": 0.0},
             {"cost": "cost_01_derivative_error_pendulum_angle_asinh_rms", "weight": 0.0},
             {"cost": "cost_01_memory_pendulum_angle", "weight": 0.0},
             {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
@@ -300,8 +357,11 @@
         {
           "controller": "cart_position",
           "components": [
-            {"cost": "cost_01_error_cart_position_operating", "weight": 1.0},
+            {"cost": "cost_01_error_cart_position_operating", "weight": 0.0},
             {"cost": "cost_01_error_cart_position_rms", "weight": 0.0},
+            {"cost": "cost_error_cart_position_sum_square", "weight": 1.0},
+            {"cost": "cost_error_cart_position_asinh_rms", "weight": 0.0},
+            {"cost": "cost_01_delta_error_cart_position", "weight": 0.0},
             {"cost": "cost_01_derivative_error_cart_position_asinh_rms", "weight": 0.0},
             {"cost": "cost_01_memory_cart_position", "weight": 0.0},
             {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
@@ -312,15 +372,16 @@
     },
     "cooperative": {
       "enabled": true,
-      "reward_mode": "progress_residual",              # "absolute" | "progress" | "progress_residual" | "regime_residual"
+      "reward_mode": "absolute",              # "absolute" | "progress" | "progress_residual" | "regime_residual"
       "residual_weight": 0.1,
       "potential": {
-        "method": "geometric_consensus",                   # "norm-p" | "geometric_consensus"
+        "method": "concurrent_progress",                   # "norm-p" | "geometric_consensus" | "concurrent_progress"
         "p": 1.0,                              # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
         "epsilon_geom_conc": 1.0e-8,
+        "deterioration_order": 2.0,
         "variables": [
-          {"id": "pendulum_angle", "source": "local_cost_01_pendulum_angle", "weight": 0.6},
-          {"id": "cart_position", "source": "local_cost_01_cart_position", "weight": 0.4}
+          {"id": "pendulum_angle", "source": "local_health_01_pendulum_angle", "weight": 0.6},
+          {"id": "cart_position", "source": "local_health_01_cart_position", "weight": 0.4}
         ]
       },
       "adaptive_weights": {
@@ -333,13 +394,18 @@
           {"id": "cart_position", "source": "local_cost_01_cart_position"}
         ]
       },
-      "synchrony": {
+      "balance": {
         "enabled": false,
         "strength": 0.2,
         "health_variables": [
           {"id": "pendulum_angle", "source": "local_health_01_pendulum_angle"},
           {"id": "cart_position", "source": "local_health_01_cart_position"}
         ]
+      },
+      "synchrony": {
+        "enabled": false,
+        "source": "evolution_alignment_01",
+        "strength": 0.2
       },
       "adaptive_residual": {                            # valores altos aumentan el peso residual segun `gamma`
         "enabled": false,
@@ -463,6 +529,8 @@
         "cost_01_error_pendulum_angle_rms",
         "raw_cost_error_cart_position_rms",
         "cost_01_error_cart_position_rms",
+        "raw_evolution_alignment",
+        "evolution_alignment_01",
         "delta_error_pendulum_angle",
         "abs_delta_error_pendulum_angle",
         "raw_cost_delta_error_pendulum_angle",
@@ -471,6 +539,14 @@
         "abs_delta_error_cart_position",
         "raw_cost_delta_error_cart_position",
         "cost_01_delta_error_cart_position",
+        "raw_cost_error_pendulum_angle_sum_square",
+        "cost_error_pendulum_angle_sum_square",
+        "raw_cost_error_cart_position_sum_square",
+        "cost_error_cart_position_sum_square",
+        "raw_cost_error_pendulum_angle_asinh_rms",
+        "cost_error_pendulum_angle_asinh_rms",
+        "raw_cost_error_cart_position_asinh_rms",
+        "cost_error_cart_position_asinh_rms",
         "raw_cost_memory_pendulum_angle",
         "cost_01_memory_pendulum_angle",
         "raw_cost_memory_cart_position",
@@ -484,30 +560,36 @@
         "delta_u_total_interval",
         "raw_cost_delta_u_total_abs",
         "cost_01_delta_u_total_abs",
-        "p25_abs_error_pendulum_angle",
-        "p75_abs_error_pendulum_angle",
-        "iqr_abs_error_pendulum_angle",
-        "raw_cost_error_pendulum_angle_abs_median",
-        "cost_01_error_pendulum_angle_abs_median_robust",
-        "p25_abs_error_cart_position",
-        "p75_abs_error_cart_position",
-        "iqr_abs_error_cart_position",
-        "raw_cost_error_cart_position_abs_median",
-        "cost_01_error_cart_position_abs_median_robust",
+        # "p25_abs_error_pendulum_angle",
+        # "p75_abs_error_pendulum_angle",
+        # "iqr_abs_error_pendulum_angle",
+        # "raw_cost_error_pendulum_angle_abs_median",
+        # "cost_01_error_pendulum_angle_abs_median_robust",
+        # "p25_abs_error_cart_position",
+        # "p75_abs_error_cart_position",
+        # "iqr_abs_error_cart_position",
+        # "raw_cost_error_cart_position_abs_median",
+        # "cost_01_error_cart_position_abs_median_robust",
         "local_cost_01_pendulum_angle",
         "local_health_01_pendulum_angle",
+        "health_delta_signed_pendulum_angle",
         "local_need_01_pendulum_angle",
         "local_reward_signed_pendulum_angle",
         "cooperative_weight_effective_pendulum_angle",
         "local_cost_01_cart_position",
         "local_health_01_cart_position",
+        "health_delta_signed_cart_position",
         "local_need_01_cart_position",
         "local_reward_signed_cart_position",
         "cooperative_weight_effective_cart_position",
         "cooperative_cost_01",
         "cooperative_reward_signed",
+        "cooperative_positive_progress_01",
+        "cooperative_deterioration_01",
+        "cooperative_progress_signed",
         "cooperative_potential_base_01",
-        "synchrony_health_balance_01",
+        "health_balance_01",
+        "balance_factor_01",
         "synchrony_factor_01",
         "collective_potential_01",
         "cooperative_potential_01",
@@ -518,42 +600,42 @@
         "global_interval_reward",
         "reward_controller_pendulum_angle",
         "reward_controller_cart_position",
-        "reward_agent_kp_pendulum_angle",
-        "reward_agent_ki_pendulum_angle",
-        "reward_agent_kd_pendulum_angle",
-        "reward_agent_kp_cart_position",
-        "reward_agent_ki_cart_position",
-        "reward_agent_kd_cart_position",
+        # "reward_agent_kp_pendulum_angle",
+        # "reward_agent_ki_pendulum_angle",
+        # "reward_agent_kd_pendulum_angle",
+        # "reward_agent_kp_cart_position",
+        # "reward_agent_ki_cart_position",
+        # "reward_agent_kd_cart_position",
         "reward_for_learning_kp_pendulum_angle",
         "reward_for_learning_ki_pendulum_angle",
         "reward_for_learning_kd_pendulum_angle",
         "reward_for_learning_kp_cart_position",
         "reward_for_learning_ki_cart_position",
         "reward_for_learning_kd_cart_position",
-        "action_kp_pendulum_angle",
-        "action_ki_pendulum_angle",
-        "action_kd_pendulum_angle",
-        "action_kp_cart_position",
-        "action_ki_cart_position",
-        "action_kd_cart_position",
-        "delta_gain_requested_kp_pendulum_angle",
-        "delta_gain_applied_kp_pendulum_angle",
-        "gain_value_kp_pendulum_angle",
-        "delta_gain_requested_ki_pendulum_angle",
-        "delta_gain_applied_ki_pendulum_angle",
-        "gain_value_ki_pendulum_angle",
-        "delta_gain_requested_kd_pendulum_angle",
-        "delta_gain_applied_kd_pendulum_angle",
-        "gain_value_kd_pendulum_angle",
-        "delta_gain_requested_kp_cart_position",
-        "delta_gain_applied_kp_cart_position",
-        "gain_value_kp_cart_position",
-        "delta_gain_requested_ki_cart_position",
-        "delta_gain_applied_ki_cart_position",
-        "gain_value_ki_cart_position",
-        "delta_gain_requested_kd_cart_position",
-        "delta_gain_applied_kd_cart_position",
-        "gain_value_kd_cart_position",
+        # "action_kp_pendulum_angle",
+        # "action_ki_pendulum_angle",
+        # "action_kd_pendulum_angle",
+        # "action_kp_cart_position",
+        # "action_ki_cart_position",
+        # "action_kd_cart_position",
+        # "delta_gain_requested_kp_pendulum_angle",
+        # "delta_gain_applied_kp_pendulum_angle",
+        # "gain_value_kp_pendulum_angle",
+        # "delta_gain_requested_ki_pendulum_angle",
+        # "delta_gain_applied_ki_pendulum_angle",
+        # "gain_value_ki_pendulum_angle",
+        # "delta_gain_requested_kd_pendulum_angle",
+        # "delta_gain_applied_kd_pendulum_angle",
+        # "gain_value_kd_pendulum_angle",
+        # "delta_gain_requested_kp_cart_position",
+        # "delta_gain_applied_kp_cart_position",
+        # "gain_value_kp_cart_position",
+        # "delta_gain_requested_ki_cart_position",
+        # "delta_gain_applied_ki_cart_position",
+        # "gain_value_ki_cart_position",
+        # "delta_gain_requested_kd_cart_position",
+        # "delta_gain_applied_kd_cart_position",
+        # "gain_value_kd_cart_position",
         "td_error_kp_pendulum_angle",
         "td_error_ki_pendulum_angle",
         "td_error_kd_pendulum_angle",

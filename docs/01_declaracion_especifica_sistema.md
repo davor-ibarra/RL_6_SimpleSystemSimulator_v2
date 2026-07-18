@@ -242,9 +242,11 @@ $$
 
 Las senales `<variable>_rms_norm` permiten observar amplitud promedio, mientras que `cost_<...>_01` conserva la energia media normalizada que compone la recompensa.
 
+Las metricas multivariables declaran `sources` con varias senales intervalares ya calculadas. `oriented_rate_alignment` conserva el valor anterior de cada fuente, las orienta como salud segun `objective`, calcula sus tasas relativas y produce `raw_evolution_alignment`. El primer intervalo es neutro con alineacion igual a uno y la memoria se reinicia por episodio.
+
 ## Recompensa
 
-La recompensa declara las fuentes conceptuales que alimentan cada etapa y conserva nombres canonicos para sus resultados. Cada controlador local declara sus componentes de costo. La cooperacion declara por separado las fuentes del potencial, de la necesidad usada por los pesos adaptativos, de la salud usada por la sincronizacion y del residual adaptativo. Esta separacion permite cambiar una representacion cientifica sin renombrar salidas ni modificar `RewardCalculator`.
+La recompensa declara las fuentes conceptuales que alimentan cada etapa y conserva nombres canonicos para sus resultados. Cada controlador local declara sus componentes de costo. La cooperacion declara por separado las fuentes del potencial, de la necesidad usada por los pesos adaptativos, de la salud usada por el balance, de la sincronizacion temporal y del residual adaptativo. Esta separacion permite cambiar una representacion cientifica sin renombrar salidas ni modificar `RewardCalculator`.
 
 Para cada controlador $j$, el costo local se define como combinacion convexa de componentes de costo configurados:
 
@@ -253,13 +255,13 @@ c^{\mathrm{local}}_j
 = \sum_q w_{j,q} c_{j,q},
 $$
 
-con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. La configuracion vigente mantiene como componente activo `cost_01_error_<controller>_operating`; las demas representaciones declaradas permanecen disponibles con peso cero para experimentacion. La recompensa local firmada es:
+con $w_{j,q} \geq 0$ y $\sum_q w_{j,q} = 1$. La configuracion vigente mantiene como componente activo `cost_01_error_<controller>_rms`; las demas representaciones declaradas permanecen disponibles con peso cero para experimentacion. La recompensa local firmada es:
 
 $$
 r^{\mathrm{local}}_j = 1 - 2c^{\mathrm{local}}_j.
 $$
 
-El componente cooperativo combina los costos normalizados declarados en `reward.cooperative.potential.variables`. En la configuracion vigente sus fuentes son los costos locales, por lo que conserva el comportamiento anterior. El modo de potencial se declara en `reward.cooperative.potential.method` y la transformacion temporal de recompensa se declara en `reward.cooperative.reward_mode`. Los pesos son no negativos:
+El componente cooperativo combina las fuentes normalizadas declaradas en `reward.cooperative.potential.variables`. `norm-p` y `geometric_consensus` las interpretan como costos; `concurrent_progress` las interpreta como saludes. El modo de potencial se declara en `reward.cooperative.potential.method` y la transformacion temporal de recompensa se declara en `reward.cooperative.reward_mode`. Los pesos son no negativos:
 
 $$
 \qquad \sum_i \lambda_i = 1.
@@ -331,11 +333,29 @@ $$
 
 con $0 < \epsilon < 1$. Este modo penaliza de forma multiplicativa el deterioro simultaneo de las variables declaradas sin recalcular costos desde senales fisicas.
 
+En modo `concurrent_progress`, cada fuente es una salud $h_i\in[0,1]$ y se calcula $\delta_i=h_{i,t}-h_{i,t-1}$. El progreso positivo y el deterioro son:
+
+$$
+P=\prod_i[\delta_i]_+^{\lambda_i},
+\qquad
+D=\left(\sum_i\lambda_i[-\delta_i]_+^{q_d}\right)^{1/q_d}.
+$$
+
+El progreso positivo es cero si alguna variable no mejora. La senal firmada y el potencial base son:
+
+$$
+q^{CP}=P-D,
+\qquad
+\Phi_t^{base}=\frac{q^{CP}+1}{2}.
+$$
+
+El primer intervalo conserva las saludes actuales como referencia y produce $P=D=q^{CP}=0$ y $\Phi_0^{base}=0.5$.
+
 Cuando los pesos adaptativos estan activos, el intervalo actual utiliza necesidades calculadas en el intervalo anterior. Cada necesidad combina el costo declarado en `adaptive_weights.need_variables`, su deterioro positivo, el piso de peso y el suavizado configurado. Estas fuentes pueden ser distintas de las usadas para construir el potencial. El primer intervalo usa pesos uniformes porque aun no existe historia del episodio.
 
-La sincronizacion opcional compara el potencial base con la salud aritmetica ponderada de `synchrony.health_variables`; estas fuentes se interpretan directamente como salud en `[0,1]` y pueden diferir de los costos del potencial. Su factor, elevado a `synchrony.strength`, multiplica el potencial base y produce el potencial colectivo final. El residual adaptativo varia su peso entre los limites configurados segun `adaptive_residual.source`, interpretada como calidad en `[0,1]`. El modo `regime_residual` selecciona el modo basico y el peso residual mediante los umbrales declarados.
+El balance opcional utiliza las saludes de `balance.health_variables` y los pesos efectivos del potencial. Compara su media geometrica $G_H$ con su media aritmetica $A_H$ mediante $B=G_H/A_H$, con $B=1$ cuando $A_H=0$, y aplica $F_B=B^{strength}$. El nuevo `synchrony` consume una unica fuente intervalar, actualmente `evolution_alignment_01`, y aplica $F_S=S^{strength}$. El potencial colectivo final es $\Phi=\operatorname{clip}_{[0,1]}(\Phi^{base}F_BF_S)$. El residual adaptativo varia su peso entre los limites configurados segun `adaptive_residual.source`, interpretada como calidad en `[0,1]`. El modo `regime_residual` selecciona el modo basico y el peso residual mediante los umbrales declarados.
 
-El calculador mantiene $\Phi_{t-1}$ y, cuando corresponde, los costos y necesidades anteriores usados por la adaptacion de pesos. Toda esta memoria se reinicia al comienzo de cada episodio. En el primer intervalo, el potencial anterior se inicializa con $\Phi_t$, de modo que:
+El calculador mantiene $\Phi_{t-1}$ y, cuando corresponde, los costos, necesidades y saludes anteriores. Toda esta memoria se reinicia al comienzo de cada episodio. En el primer intervalo, el potencial anterior se inicializa con $\Phi_t$, de modo que:
 
 $$
 \Delta \Phi_t = \Phi_t - \Phi_{t-1} = 0.
@@ -391,7 +411,7 @@ El gestor de simulacion evalua la terminacion a partir de senales fisicas crudas
 - alcanzar una region de estabilizacion;
 - agotar el tiempo maximo del episodio.
 
-La dinamica no decide la terminacion. Esta responsabilidad pertenece al flujo temporal del `SimulationManager`.
+La dinamica no decide la terminacion. Esta responsabilidad pertenece al flujo temporal del `SimulationManager`. En modo `instantaneous`, una muestra dentro de las cuatro bandas confirma la estabilizacion. En modo `persistence`, las cuatro condiciones deben mantenerse continuamente durante `persistence_sec`; cualquier incumplimiento reinicia el tiempo acumulado y la memoria se reinicia al comenzar cada episodio.
 
 ## Persistencia experimental
 

@@ -181,6 +181,29 @@ def _reduce_values(values, reduce_config, interval_duration_sec, dt_sec, denomin
     raise ValueError(f"Unsupported interval_reduce method: {method}")
 
 
+def _oriented_rate_alignment(current_values, previous_values, reduce_config):
+    if previous_values is None:
+        return 1.0
+
+    if reduce_config["objective"] == "minimize":
+        current_health = 1.0 - current_values
+        previous_health = 1.0 - previous_values
+    else:
+        current_health = current_values
+        previous_health = previous_values
+
+    epsilon = float(reduce_config["epsilon"])
+    oriented_rates = (current_health - previous_health) / (
+        np.abs(current_health) + np.abs(previous_health) + epsilon
+    )
+    rate_reference = float(np.max(np.abs(oriented_rates)))
+    if rate_reference == 0.0:
+        return 1.0
+
+    rate_range = float(np.max(oriented_rates) - np.min(oriented_rates))
+    return _clip(1.0 - rate_range / rate_reference, 0.0, 1.0)
+
+
 def _write_audit_stats(interval, interval_idx, values, audit_stats):
     p25 = float(np.percentile(values, 25))
     p75 = float(np.percentile(values, 75))
@@ -276,6 +299,10 @@ class MetricProcessor:
         self.interval_metrics = metrics_config["interval_metrics"]
         self.output_limits = metrics_config["output_limits"]
         self.dt_sec = float(dt_sec)
+        self.previous_source_values = {}
+        for metric_config in self.interval_metrics:
+            if "sources" in metric_config:
+                self.previous_source_values[metric_config["raw_target"]] = None
 
         if float(self.output_limits[0]) != 0.0 or float(self.output_limits[1]) != 1.0:
             raise ValueError("Metric output_limits must be [0.0, 1.0]")
@@ -283,7 +310,8 @@ class MetricProcessor:
             raise ValueError("MetricProcessor dt_sec must be positive")
 
     def reset_episode(self):
-        pass
+        for raw_target in self.previous_source_values:
+            self.previous_source_values[raw_target] = None
 
     def aggregate_interval(self, interval_idx, start_step_idx, end_step_idx):
         if end_step_idx < start_step_idx:
@@ -292,6 +320,10 @@ class MetricProcessor:
         interval_duration_sec = _interval_duration_sec(start_step_idx, end_step_idx, self.dt_sec)
 
         for metric_config in self.interval_metrics:
+            if metric_config["interval_reduce"]["method"] == "oriented_rate_alignment":
+                self.aggregate_oriented_rate_alignment(metric_config, interval_idx)
+                continue
+
             source_array, source_scope = _resolve_source(self.step, self.interval, metric_config["source"])
             source_values = _source_values(source_array, source_scope, interval_idx, start_step_idx, end_step_idx)
             _finite_array(source_values, metric_config["source"])
@@ -351,3 +383,26 @@ class MetricProcessor:
             target_value = _scale_value(raw_value, metric_config["scaler"])
             _finite_scalar(target_value, metric_config["target"])
             getattr(self.interval, metric_config["target"])[interval_idx] = target_value
+
+    def aggregate_oriented_rate_alignment(self, metric_config, interval_idx):
+        current_values = np.asarray(
+            [
+                getattr(self.interval, source_name)[interval_idx]
+                for source_name in metric_config["sources"]
+            ],
+            dtype=np.float64,
+        )
+        transformed_values = _transform_values(current_values, metric_config["sample_transform"])
+        raw_target = metric_config["raw_target"]
+        previous_values = self.previous_source_values[raw_target]
+        reduced_value = _oriented_rate_alignment(
+            transformed_values,
+            previous_values,
+            metric_config["interval_reduce"],
+        )
+        self.previous_source_values[raw_target] = transformed_values.copy()
+
+        raw_value = _transform_scalar(reduced_value, metric_config["post_transform"])
+        getattr(self.interval, raw_target)[interval_idx] = raw_value
+        target_value = _scale_value(raw_value, metric_config["scaler"])
+        getattr(self.interval, metric_config["target"])[interval_idx] = target_value
