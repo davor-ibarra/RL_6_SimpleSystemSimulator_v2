@@ -35,6 +35,8 @@ class GainAgent:
     q_value_array: np.ndarray
     q_table: np.ndarray
     visits: np.ndarray
+    episode_initial_q_table: np.ndarray
+    episode_visited_state_indices: set
     current_state_idx: int
     last_state_idx: int
     last_action_idx: int
@@ -253,6 +255,7 @@ class PIDQLearningAgent:
                 gain_state_count,
                 additional_state_counts,
             )
+            q_table = np.zeros((n_states, len(self.action_moves)), dtype=np.float64)
             self.tracks.append(
                 GainAgent(
                     agent_id=agent_id,
@@ -270,8 +273,10 @@ class PIDQLearningAgent:
                     gain_value_array=getattr(self.interval, f"gain_value_{agent_id}"),
                     td_error_array=getattr(self.interval, f"td_error_{agent_id}"),
                     q_value_array=getattr(self.interval, f"q_value_{agent_id}"),
-                    q_table=np.zeros((n_states, len(self.action_moves)), dtype=np.float64),
+                    q_table=q_table,
                     visits=np.zeros((n_states, len(self.action_moves)), dtype=np.int64),
+                    episode_initial_q_table=q_table.copy(),
+                    episode_visited_state_indices={initial_state_idx},
                     current_state_idx=initial_state_idx,
                     last_state_idx=initial_state_idx,
                     last_action_idx=self.maintain_action_idx
@@ -296,17 +301,23 @@ class PIDQLearningAgent:
             )
             track.last_state_idx = track.current_state_idx
             track.last_action_idx = self.maintain_action_idx
+            track.episode_initial_q_table = track.q_table.copy()
+            track.episode_visited_state_indices = {track.current_state_idx}
 
     def random_action_idx(self):
         return int(self.rng.integers(0, len(self.action_moves)))
 
     def select_greedy_action_idx(self, q_values):
-        max_q = np.max(q_values)
-        best_actions = np.flatnonzero(np.isclose(q_values, max_q))
+        best_actions = self.greedy_action_indices(q_values)
         return int(self.rng.choice(best_actions))
+
+    def greedy_action_indices(self, q_values):
+        max_q = np.max(q_values)
+        return np.flatnonzero(np.isclose(q_values, max_q))
 
     def select_actions(self, interval_idx):
         for track in self.tracks:
+            track.episode_visited_state_indices.add(track.current_state_idx)
             if self.rng.random() < self.epsilon:
                 action_idx = self.random_action_idx()
             else:
@@ -353,12 +364,37 @@ class PIDQLearningAgent:
             track.td_error_array[interval_idx] = td_error
             track.q_value_array[interval_idx] = updated_q
             track.current_state_idx = next_state_idx
+            track.episode_visited_state_indices.add(next_state_idx)
 
     def decay_learning_parameters(self):
         if self.epsilon_decay_enabled:
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay_factor)
         if self.learning_rate_decay_enabled:
             self.learning_rate = max(self.learning_rate_min, self.learning_rate * self.learning_rate_decay_factor)
+
+    def episode_learning_metrics(self):
+        metrics = []
+        for track in self.tracks:
+            q_delta = track.q_table - track.episode_initial_q_table
+            q_delta_rms = float(np.sqrt(np.mean(q_delta**2)))
+            stable_state_count = 0
+            visited_state_indices = sorted(track.episode_visited_state_indices)
+            for state_idx in visited_state_indices:
+                initial_greedy_actions = tuple(
+                    self.greedy_action_indices(track.episode_initial_q_table[state_idx]).tolist()
+                )
+                final_greedy_actions = tuple(self.greedy_action_indices(track.q_table[state_idx]).tolist())
+                if initial_greedy_actions == final_greedy_actions:
+                    stable_state_count += 1
+            metrics.append(
+                {
+                    "agent_id": track.agent_id,
+                    "q_delta_rms": q_delta_rms,
+                    "policy_stability": float(stable_state_count / len(visited_state_indices)),
+                    "visited_state_count": len(visited_state_indices),
+                }
+            )
+        return metrics
 
     def export_state(self):
         agents = []

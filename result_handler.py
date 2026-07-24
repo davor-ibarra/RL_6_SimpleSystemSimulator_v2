@@ -4,6 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 
 def _json_default(value):
@@ -85,7 +87,7 @@ def _series_stat(values, stat_name):
 
 
 class ResultHandler:
-    def __init__(self, output_dir, data_config, termination_config):
+    def __init__(self, output_dir, data_config, termination_config, metric_report):
         self.output_dir = Path(output_dir)
         self.dataset_dir = self.output_dir / "dataset_chunks"
         self.agent_state_dir = self.output_dir / "agent_state"
@@ -97,12 +99,14 @@ class ResultHandler:
         if self.episodes_per_dataset_chunk <= 0:
             raise ValueError("episodes_per_dataset_chunk must be positive")
         self.summary_config = data_config["summary"]
+        self.metric_report = metric_report
         self.reason_names_by_code = {}
         for reason_name, reason_code in termination_config["reason_codes"].items():
             self.reason_names_by_code[int(reason_code)] = reason_name
         self.pending_episodes = []
         self.chunk_idx = 0
         self.summary_rows = []
+        self.metric_report_rows = []
         self.metadata = {}
         self.latest_agent_state = None
 
@@ -115,8 +119,25 @@ class ResultHandler:
     def save_episode(self, episode_output):
         self.pending_episodes.append(episode_output)
         self.summary_rows.append(self.build_summary_row(episode_output))
+        self.metric_report_rows.append(self.build_metric_report_row(episode_output))
         if len(self.pending_episodes) >= self.episodes_per_dataset_chunk:
             self.flush_chunk()
+
+    def build_metric_report_row(self, episode_output):
+        step_data = episode_output["step_data"]
+        interval_data = episode_output["interval_data"]
+        end_data = episode_output["end_episode_data"]
+        row = {
+            "episode_id": episode_output["episode_id"],
+            "n_step": step_data["n_step"],
+            "n_interval": interval_data["n_interval"],
+            "effective_duration_sec": end_data["final_t_sec"],
+            "termination_reason_code": end_data["end_termination_reason_code"],
+            "termination_reason": end_data["end_termination_reason"],
+        }
+        for signal_name in self.metric_report.metric_signal_names:
+            row[signal_name] = end_data[signal_name]
+        return row
 
     def build_summary_row(self, episode_output):
         step_data = episode_output["step_data"]
@@ -222,6 +243,7 @@ class ResultHandler:
     def finalize_run(self):
         self.flush_chunk()
         self.write_summary_workbook()
+        self.write_metric_report_workbook()
 
     def write_summary_workbook(self):
         summary_path = self.output_dir / "summary.xlsx"
@@ -234,3 +256,96 @@ class ResultHandler:
                 q_rows, visit_rows = _agent_tables(self.latest_agent_state)
                 pd.DataFrame(q_rows).to_excel(writer, sheet_name="q_tables_final", index=False)
                 pd.DataFrame(visit_rows).to_excel(writer, sheet_name="q_visits_final", index=False)
+
+    def write_metric_report_workbook(self):
+        metric_report_path = self.output_dir / "metric_report.xlsx"
+        episode_metrics = pd.DataFrame(
+            self.metric_report_rows,
+            columns=self.metric_report.episode_columns,
+        )
+        metric_catalog = pd.DataFrame(
+            self.metric_report.catalog_rows,
+            columns=self.metric_report.catalog_columns,
+        )
+        run_config = pd.DataFrame(
+            [self.metric_report.run_config_row],
+            columns=self.metric_report.run_config_columns,
+        )
+        with pd.ExcelWriter(metric_report_path, engine="openpyxl") as writer:
+            episode_metrics.to_excel(writer, sheet_name="Episode_Metrics", index=False)
+            metric_catalog.to_excel(writer, sheet_name="Metric_Catalog", index=False)
+            run_config.to_excel(writer, sheet_name="Run_Config", index=False)
+            self.format_metric_report_workbook(writer.book)
+
+    def format_metric_report_workbook(self, workbook):
+        header_fill = PatternFill(fill_type="solid", fgColor="1F4E78")
+        header_font = Font(color="FFFFFF", bold=True)
+        header_border = Border(bottom=Side(style="medium", color="17365D"))
+
+        for worksheet in workbook.worksheets:
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = worksheet.dimensions
+            worksheet.sheet_view.showGridLines = False
+            worksheet.row_dimensions[1].height = 42
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.border = header_border
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        episode_sheet = workbook["Episode_Metrics"]
+        metric_formats = {
+            spec.canonical_name: spec.number_format for spec in self.metric_report.metric_specs
+        }
+        identity_formats = {
+            "episode_id": "0",
+            "n_step": "0",
+            "n_interval": "0",
+            "effective_duration_sec": "0.000000",
+            "termination_reason_code": "0",
+            "termination_reason": "@",
+        }
+        for column_idx, field_name in enumerate(self.metric_report.episode_columns, start=1):
+            number_format = identity_formats[field_name] if field_name in identity_formats else metric_formats[field_name]
+            for row_idx in range(2, episode_sheet.max_row + 1):
+                episode_sheet.cell(row=row_idx, column=column_idx).number_format = number_format
+            if field_name == "termination_reason":
+                episode_sheet.column_dimensions[get_column_letter(column_idx)].width = 24
+            elif field_name in ("episode_id", "n_step", "n_interval", "termination_reason_code"):
+                episode_sheet.column_dimensions[get_column_letter(column_idx)].width = 14
+            else:
+                episode_sheet.column_dimensions[get_column_letter(column_idx)].width = 19
+
+        catalog_sheet = workbook["Metric_Catalog"]
+        catalog_widths = {
+            "canonical_name": 42,
+            "scientific_label": 38,
+            "family": 24,
+            "entity_type": 16,
+            "entity_id": 24,
+            "unit_or_domain": 24,
+            "definition": 68,
+            "applicability": 52,
+            "denominator": 32,
+            "recommended_summary": 32,
+            "interpretation": 52,
+            "number_format": 18,
+        }
+        for column_idx, field_name in enumerate(self.metric_report.catalog_columns, start=1):
+            catalog_sheet.column_dimensions[get_column_letter(column_idx)].width = catalog_widths[field_name]
+            for row_idx in range(2, catalog_sheet.max_row + 1):
+                cell = catalog_sheet.cell(row=row_idx, column=column_idx)
+                cell.number_format = "@"
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        for row_idx in range(2, catalog_sheet.max_row + 1):
+            catalog_sheet.row_dimensions[row_idx].height = 46
+
+        run_config_sheet = workbook["Run_Config"]
+        for column_idx, field_name in enumerate(self.metric_report.run_config_columns, start=1):
+            width = min(36, max(18, len(field_name) + 2))
+            run_config_sheet.column_dimensions[get_column_letter(column_idx)].width = width
+            value = self.metric_report.run_config_row[field_name]
+            if isinstance(value, float):
+                run_config_sheet.cell(row=2, column=column_idx).number_format = "0.000000"
+            elif isinstance(value, int) and not isinstance(value, bool):
+                run_config_sheet.cell(row=2, column=column_idx).number_format = "0"

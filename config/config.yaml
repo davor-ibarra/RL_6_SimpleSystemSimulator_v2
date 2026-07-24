@@ -1,5 +1,6 @@
 {
   "simulation": {
+    "mode": "training",                       # "training" | "fixed_pid"
     "n_episodes": 5000,
     "episode_duration_sec": 10.0,
     "dt_sec": 0.001,
@@ -226,40 +227,40 @@
         "target": "cost_error_cart_position_asinh_rms"
       },
       {
-        "source": "error_pendulum_angle_norm",
-        "sample_transform": {"method": "abs"},
-        "interval_reduce": {"method": "mean"},
+        "source": "integral_error_pendulum_angle_norm",
+        "sample_transform": {"method": "identity"},
+        "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_memory_pendulum_angle",
-        "scaler": {"method": "bound", "mode": "positive", "bound": 1.0, "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 0.281735186795783, "clip": true},  # P95 max(|min|, |max|), run_20260717_2237
         "target": "cost_01_memory_pendulum_angle"
       },
       {
-        "source": "error_cart_position_norm",
-        "sample_transform": {"method": "abs"},
-        "interval_reduce": {"method": "mean"},
+        "source": "integral_error_cart_position_norm",
+        "sample_transform": {"method": "identity"},
+        "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
         "raw_target": "raw_cost_memory_cart_position",
-        "scaler": {"method": "bound", "mode": "positive", "bound": 0.9, "clip": true},
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.02340668487968, "clip": true},  # P95 max(|min|, |max|), run_20260717_2237
         "target": "cost_01_memory_cart_position"
       },
       {
         "source": "derivative_error_pendulum_angle_norm",
-        "sample_transform": {"method": "asinh", "scale": 1.0},
+        "sample_transform": {"method": "identity"},
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
-        "raw_target": "raw_cost_derivative_error_pendulum_angle_asinh_rms",
-        "scaler": {"method": "bound", "mode": "positive", "bound": 1.6, "clip": true},
-        "target": "cost_01_derivative_error_pendulum_angle_asinh_rms"
+        "raw_target": "raw_cost_derivative_error_pendulum_angle_rms",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 2.15414686481494, "clip": true},  # P95 max(|min|, |max|), run_20260717_2237
+        "target": "cost_01_derivative_error_pendulum_angle_rms"
       },
       {
         "source": "derivative_error_cart_position_norm",
-        "sample_transform": {"method": "asinh", "scale": 1.0},
+        "sample_transform": {"method": "identity"},
         "interval_reduce": {"method": "rms"},
         "post_transform": {"method": "none"},
-        "raw_target": "raw_cost_derivative_error_cart_position_asinh_rms",
-        "scaler": {"method": "bound", "mode": "positive", "bound": 1.1, "clip": true},
-        "target": "cost_01_derivative_error_cart_position_asinh_rms"
+        "raw_target": "raw_cost_derivative_error_cart_position_rms",
+        "scaler": {"method": "bound", "mode": "positive", "bound": 1.07030634970877, "clip": true},  # P95 max(|min|, |max|), run_20260717_2237
+        "target": "cost_01_derivative_error_cart_position_rms"
       },
       {
         "source": "u_total",
@@ -330,12 +331,12 @@
     ]
   },
   "reward": {
-    "assignment": "controller_reward",
+    "assignment": "controller_reward",        # controller_reward | global_reward
     "domain": "signed_unit",
     "composition": {
       "weights": {
-        "local": 1.0,
-        "cooperative": 0.0,
+        "local": 0.5,
+        "cooperative": 0.5,
         "strategic": 0.0
       }
     },
@@ -344,27 +345,29 @@
         {
           "controller": "pendulum_angle",
           "components": [
-            {"cost": "cost_01_error_pendulum_angle_operating", "weight": 0.0},
-            {"cost": "cost_01_error_pendulum_angle_rms", "weight": 0.0},
-            {"cost": "cost_error_pendulum_angle_sum_square", "weight": 1.0},
-            {"cost": "cost_error_pendulum_angle_asinh_rms", "weight": 0.0},
-            {"cost": "cost_01_delta_error_pendulum_angle", "weight": 0.0},
-            {"cost": "cost_01_derivative_error_pendulum_angle_asinh_rms", "weight": 0.0},
+            {"cost": "cost_01_error_pendulum_angle_operating", "weight": 1.0},
+            # {"cost": "cost_01_error_pendulum_angle_rms", "weight": 0.0},
+            # {"cost": "cost_error_pendulum_angle_sum_square", "weight": 0.0},
+            # {"cost": "cost_error_pendulum_angle_asinh_rms", "weight": 0.0},
+            # {"cost": "cost_01_delta_error_pendulum_angle", "weight": 0.0},
+            {"cost": "cost_01_derivative_error_pendulum_angle_rms", "weight": 0.0},
             {"cost": "cost_01_memory_pendulum_angle", "weight": 0.0},
-            {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
+            # {"cost": "cost_01_u_total_rms", "weight": 0.0},
+            # {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
           ]
         },
         {
           "controller": "cart_position",
           "components": [
-            {"cost": "cost_01_error_cart_position_operating", "weight": 0.0},
-            {"cost": "cost_01_error_cart_position_rms", "weight": 0.0},
-            {"cost": "cost_error_cart_position_sum_square", "weight": 1.0},
-            {"cost": "cost_error_cart_position_asinh_rms", "weight": 0.0},
-            {"cost": "cost_01_delta_error_cart_position", "weight": 0.0},
-            {"cost": "cost_01_derivative_error_cart_position_asinh_rms", "weight": 0.0},
+            {"cost": "cost_01_error_cart_position_operating", "weight": 1.0},
+            # {"cost": "cost_01_error_cart_position_rms", "weight": 0.0},
+            # {"cost": "cost_error_cart_position_sum_square", "weight": 0.0},
+            # {"cost": "cost_error_cart_position_asinh_rms", "weight": 0.0},
+            # {"cost": "cost_01_delta_error_cart_position", "weight": 0.0},
+            {"cost": "cost_01_derivative_error_cart_position_rms", "weight": 0.0},
             {"cost": "cost_01_memory_cart_position", "weight": 0.0},
-            {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
+            # {"cost": "cost_01_u_total_rms", "weight": 0.0},
+            # {"cost": "cost_01_delta_u_total_abs", "weight": 0.0}
           ]
         }
       ]
@@ -375,19 +378,19 @@
       "reward_mode": "absolute",              # "absolute" | "progress" | "progress_residual" | "regime_residual"
       "residual_weight": 0.1,
       "potential": {
-        "method": "concurrent_progress",                   # "norm-p" | "geometric_consensus" | "concurrent_progress"
-        "p": 1.0,                              # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
+        "method": "norm-p",                   # "norm-p" | "geometric_consensus" | "concurrent_progress"
+        "p": 32.0,                              # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
         "epsilon_geom_conc": 1.0e-8,
         "deterioration_order": 2.0,
         "variables": [
-          {"id": "pendulum_angle", "source": "local_health_01_pendulum_angle", "weight": 0.6},
-          {"id": "cart_position", "source": "local_health_01_cart_position", "weight": 0.4}
+          {"id": "pendulum_angle", "source": "local_cost_01_pendulum_angle", "weight": 0.5},
+          {"id": "cart_position", "source": "local_cost_01_cart_position", "weight": 0.5}
         ]
       },
       "adaptive_weights": {
         "enabled": false,
-        "weight_floor": 0.2,
-        "deterioration_weight": 0.2,
+        "weight_floor": 0.25,
+        "deterioration_weight": 0.0,
         "smoothing_alpha": 0.0,
         "need_variables": [
           {"id": "pendulum_angle", "source": "local_cost_01_pendulum_angle"},
@@ -427,7 +430,7 @@
     terminal_learning_bonus: {
       "enabled": true,
       "bonuses":{
-        "limit_exceeded": -50.0,            # 5 -> suave | 10 -> clara | 5 -> fuerte | 50 -> dominante pero defendible
+        "limit_exceeded": -50.0,            # 5 -> suave | 10 -> clara | 20 -> fuerte | 50 -> dominante pero defendible
         "stabilization_success": 20.0,
         "time_limit": 0.0,
         "none": 0.0
@@ -551,10 +554,10 @@
         "cost_01_memory_pendulum_angle",
         "raw_cost_memory_cart_position",
         "cost_01_memory_cart_position",
-        "raw_cost_derivative_error_pendulum_angle_asinh_rms",
-        "cost_01_derivative_error_pendulum_angle_asinh_rms",
-        "raw_cost_derivative_error_cart_position_asinh_rms",
-        "cost_01_derivative_error_cart_position_asinh_rms",
+        "raw_cost_derivative_error_pendulum_angle_rms",
+        "cost_01_derivative_error_pendulum_angle_rms",
+        "raw_cost_derivative_error_cart_position_rms",
+        "cost_01_derivative_error_cart_position_rms",
         "raw_cost_u_total_rms",
         "cost_01_u_total_rms",
         "delta_u_total_interval",
@@ -563,13 +566,13 @@
         # "p25_abs_error_pendulum_angle",
         # "p75_abs_error_pendulum_angle",
         # "iqr_abs_error_pendulum_angle",
-        # "raw_cost_error_pendulum_angle_abs_median",
-        # "cost_01_error_pendulum_angle_abs_median_robust",
+        "raw_cost_error_pendulum_angle_abs_median",
+        "cost_01_error_pendulum_angle_abs_median_robust",
         # "p25_abs_error_cart_position",
         # "p75_abs_error_cart_position",
         # "iqr_abs_error_cart_position",
-        # "raw_cost_error_cart_position_abs_median",
-        # "cost_01_error_cart_position_abs_median_robust",
+        "raw_cost_error_cart_position_abs_median",
+        "cost_01_error_cart_position_abs_median_robust",
         "local_cost_01_pendulum_angle",
         "local_health_01_pendulum_angle",
         "health_delta_signed_pendulum_angle",

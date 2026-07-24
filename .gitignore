@@ -5,3 +5,6 @@ analysis/
 results_history_CartPole/
 results_smoke/
 tests/
+!tests/
+tests/*
+!tests/test_metric_report.py

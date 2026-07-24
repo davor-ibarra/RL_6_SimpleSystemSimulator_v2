@@ -10,6 +10,7 @@ class SimulationManager:
         controller_manager,
         agent,
         metric_processor,
+        metric_report,
         reward_calculator,
         metric_collector,
         result_handler,
@@ -23,11 +24,16 @@ class SimulationManager:
         self.controller_manager = controller_manager
         self.agent = agent
         self.metric_processor = metric_processor
+        self.metric_report = metric_report
         self.reward_calculator = reward_calculator
         self.metric_collector = metric_collector
         self.result_handler = result_handler
 
         simulation_config = config["simulation"]
+        self.simulation_mode = simulation_config["mode"]
+        if self.simulation_mode not in ("training", "fixed_pid"):
+            raise ValueError("simulation.mode must be training or fixed_pid")
+        self.training_enabled = self.simulation_mode == "training"
         self.n_episodes = int(simulation_config["n_episodes"])
         self.episode_duration_sec = float(simulation_config["episode_duration_sec"])
         self.dt_sec = float(simulation_config["dt_sec"])
@@ -109,6 +115,13 @@ class SimulationManager:
             self.run_interval(self.current_interval_idx)
             self.current_interval_idx += 1
 
+        self.metric_report.compute_episode(
+            episode_idx=episode_idx,
+            n_steps=self.current_step_idx,
+            n_intervals=self.current_interval_idx,
+            termination_reason_code=self.termination_reason_code,
+            training_enabled=self.training_enabled,
+        )
         self.close_episode(episode_idx)
 
     def run_interval(self, interval_idx):
@@ -117,7 +130,8 @@ class SimulationManager:
         self.interval.interval_start_step_idx[interval_idx] = interval_start_step
         self.interval.interval_t_start_sec[interval_idx] = self.step.t_sec[self.current_step_idx]
 
-        self.agent.select_actions(interval_idx)
+        if self.training_enabled:
+            self.agent.select_actions(interval_idx)
         self.controller_manager.apply_gain_actions(interval_idx)
 
         steps_in_interval = 0
@@ -144,8 +158,9 @@ class SimulationManager:
         self.metric_processor.aggregate_interval(interval_idx, interval_start_step, interval_end_step)
         self.reward_calculator.evaluate_interval(interval_idx)
         
-        terminal_for_learning = self.is_terminal_for_learning()
-        self.agent.learn(interval_idx, terminal_for_learning)
+        if self.training_enabled:
+            terminal_for_learning = self.is_terminal_for_learning()
+            self.agent.learn(interval_idx, terminal_for_learning)
 
     def run_step(self, control_step_idx, next_state_step_idx):
         u_total = self.controller_manager.compute_control_step(control_step_idx)
@@ -232,11 +247,14 @@ class SimulationManager:
             setattr(self.episode, f"final_kp_{controller_id}", float(kp_array[last_control_step_idx]))
             setattr(self.episode, f"final_ki_{controller_id}", float(ki_array[last_control_step_idx]))
             setattr(self.episode, f"final_kd_{controller_id}", float(kd_array[last_control_step_idx]))
-        self.episode.total_agent_decisions = int(n_intervals * len(self.agent.tracks))
+        self.episode.total_agent_decisions = (
+            int(n_intervals * len(self.agent.tracks)) if self.training_enabled else 0
+        )
 
         self.episode.epsilon = float(self.agent.epsilon)
         self.episode.learning_rate = float(self.agent.learning_rate)
-        self.agent.decay_learning_parameters()
+        if self.training_enabled:
+            self.agent.decay_learning_parameters()
 
         self.metric_collector.persist_episode(episode_idx, n_steps, n_intervals)
 

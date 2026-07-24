@@ -15,6 +15,9 @@ class MetricCollector:
         self.step_outputs = build_output_refs(runtime.step, output_schema["step_data"], "step_data")
         self.interval_outputs = build_output_refs(runtime.interval, output_schema["interval_data"], "interval_data")
         self.end_episode_signal_names = list(output_schema["end_episode_data"])
+        for signal_name in runtime.metric_report_signal_names:
+            if signal_name not in self.end_episode_signal_names:
+                self.end_episode_signal_names.append(signal_name)
         for signal_name in self.end_episode_signal_names:
             if not hasattr(runtime.episode, signal_name):
                 raise KeyError(f"Unknown end_episode_data output signal: {signal_name}")

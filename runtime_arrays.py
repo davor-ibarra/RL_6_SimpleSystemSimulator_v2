@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from metrics.metric_report import build_metric_report_signal_names
+
 
 @dataclass(frozen=True)
 class OutputRef:
@@ -185,6 +187,8 @@ def build_end_episode_signal_names(config):
         _append_unique(signal_names, f"final_kp_{controller_id}")
         _append_unique(signal_names, f"final_ki_{controller_id}")
         _append_unique(signal_names, f"final_kd_{controller_id}")
+    for signal_name in build_metric_report_signal_names(config):
+        _append_unique(signal_names, signal_name)
     return signal_names
 
 
@@ -197,6 +201,7 @@ def build_runtime_arrays(step_capacity, interval_capacity, config, dtype=np.floa
     step_signals = build_step_signal_names(config)
     interval_signals = build_interval_signal_names(config)
     end_episode_signals = build_end_episode_signal_names(config)
+    metric_report_signals = build_metric_report_signal_names(config)
 
     step = SimpleNamespace()
     interval = SimpleNamespace()
@@ -220,6 +225,7 @@ def build_runtime_arrays(step_capacity, interval_capacity, config, dtype=np.floa
         step_signal_names=list(step_signals),
         interval_signal_names=list(interval_signals),
         end_episode_signal_names=list(end_episode_signals),
+        metric_report_signal_names=list(metric_report_signals),
     )
 
 

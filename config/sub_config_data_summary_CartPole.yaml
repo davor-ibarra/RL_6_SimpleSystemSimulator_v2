@@ -119,13 +119,13 @@ data_summary:
       stats: [mean, std, min, p25, p50, p75, max]
     - source: cost_01_memory_cart_position
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: raw_cost_derivative_error_pendulum_angle_asinh_rms
+    - source: raw_cost_derivative_error_pendulum_angle_rms
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_01_derivative_error_pendulum_angle_asinh_rms
+    - source: cost_01_derivative_error_pendulum_angle_rms
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: raw_cost_derivative_error_cart_position_asinh_rms
+    - source: raw_cost_derivative_error_cart_position_rms
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_01_derivative_error_cart_position_asinh_rms
+    - source: cost_01_derivative_error_cart_position_rms
       stats: [mean, std, min, p25, p50, p75, max]
     - source: raw_cost_u_total_rms
       stats: [mean, std, min, p25, p50, p75, max]

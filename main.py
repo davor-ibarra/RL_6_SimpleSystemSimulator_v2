@@ -9,6 +9,7 @@ from controllers.controller_manager import ControllerManager
 from dynamic_system.cart_pole_dynamic_system import CartPoleDynamicSystem
 from metrics.metric_collector import MetricCollector
 from metrics.metric_processing import MetricProcessor
+from metrics.metric_report import MetricReport
 from result_handler import ResultHandler
 from rewards.reward_calculator import RewardCalculator
 from runtime_arrays import build_runtime_arrays
@@ -89,7 +90,21 @@ def main():
         config=config,
     )
 
-    result_handler = ResultHandler(output_dir, config["data"], config["termination"])
+    dynamic_system = CartPoleDynamicSystem(runtime, config["dynamic_system"])
+    controller_manager = ControllerManager(
+        runtime,
+        config["control"],
+        config["agent"],
+        config["simulation"]["dt_sec"],
+    )
+    agent = PIDQLearningAgent(runtime, config["agent"], config["control"])
+    metric_report = MetricReport(runtime, config, agent, run_id)
+    result_handler = ResultHandler(
+        output_dir,
+        config["data"],
+        config["termination"],
+        metric_report,
+    )
     metadata = {
         "run_id": run_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -100,14 +115,6 @@ def main():
     }
     result_handler.save_metadata(metadata)
 
-    dynamic_system = CartPoleDynamicSystem(runtime, config["dynamic_system"])
-    controller_manager = ControllerManager(
-        runtime,
-        config["control"],
-        config["agent"],
-        config["simulation"]["dt_sec"],
-    )
-    agent = PIDQLearningAgent(runtime, config["agent"], config["control"])
     metric_processor = MetricProcessor(runtime, config["metrics"], config["simulation"]["dt_sec"])
     reward_calculator = RewardCalculator(runtime, config["reward"], config["agent"], config["termination"])
     metric_collector = MetricCollector(runtime, config["data"], result_handler)
@@ -119,6 +126,7 @@ def main():
         controller_manager=controller_manager,
         agent=agent,
         metric_processor=metric_processor,
+        metric_report=metric_report,
         reward_calculator=reward_calculator,
         metric_collector=metric_collector,
         result_handler=result_handler,
