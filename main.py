@@ -1,8 +1,9 @@
 import argparse
-import json
 import math
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 from agents.pid_qlearning_agent import PIDQLearningAgent
 from controllers.controller_manager import ControllerManager
@@ -18,13 +19,7 @@ from simulation_manager import SimulationManager
 
 def load_mapping_file(config_path):
     text = config_path.read_text(encoding="utf-8")
-    try:
-        import yaml
-
-        loaded_config = yaml.safe_load(text)
-    except ModuleNotFoundError:
-        loaded_config = json.loads(text)
-    return loaded_config
+    return yaml.safe_load(text)
 
 
 def load_config(config_path):
@@ -60,7 +55,7 @@ def build_capacities(config):
 def build_output_dir(config, run_id):
     output_root = Path(config["data"]["output_root"])
     output_dir = output_root / run_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=False)
     return output_dir
 
 
@@ -80,7 +75,7 @@ def main():
 
     config = load_config(args.config)
     apply_cli_overrides(config, args)
-    run_id = datetime.now().strftime("run_%Y%m%d_%H%M")
+    run_id = datetime.now().strftime("run_%Y%m%d_%H%M_%f")
     output_dir = build_output_dir(config, run_id)
 
     step_capacity, interval_capacity = build_capacities(config)
@@ -97,16 +92,34 @@ def main():
         config["agent"],
         config["simulation"]["dt_sec"],
     )
-    agent = PIDQLearningAgent(runtime, config["agent"], config["control"])
+    agent = PIDQLearningAgent(
+        runtime,
+        config["agent"],
+        config["control"],
+        config["experiment"]["seed"],
+    )
     metric_report = MetricReport(runtime, config, agent, run_id)
+    visualization_manager = None
+    if bool(config["visualization"]["enabled"]):
+        from visualization_manager import VisualizationManager
+
+        visualization_manager = VisualizationManager(
+            output_dir,
+            config["visualization"],
+            config,
+            runtime,
+        )
     result_handler = ResultHandler(
         output_dir,
         config["data"],
         config["termination"],
         metric_report,
+        runtime,
+        visualization_manager,
     )
     metadata = {
         "run_id": run_id,
+        "seed": int(config["experiment"]["seed"]),
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "output_dir": str(output_dir),
         "step_capacity": step_capacity,
@@ -132,12 +145,6 @@ def main():
         result_handler=result_handler,
     )
     simulation_manager.run()
-
-    if bool(config["visualization"]["enabled"]):
-        from visualization_manager import VisualizationManager
-
-        visualization_manager = VisualizationManager(output_dir, config["visualization"])
-        visualization_manager.render_post_run(result_handler.summary_rows, result_handler.latest_agent_state)
 
     print(f"Run complete: {output_dir}")
 

@@ -40,16 +40,16 @@ visualization:
       enabled: true
       source: summary
       x_variable: episode_id
-      y_variable: total_reward
-      output_filename: fig2_cumulative_reward_per_episode.png
+      y_variable: total_learning_return
+      output_filename: fig2_total_learning_return_per_episode.png
       config:
-        title: Cumulative Reward per Episode
+        title: Total Learning Return per Episode
         title_fontsize: 14
         figsize_w: 12
         figsize_h: 6
         xlabel: Episode [-]
         xlabel_fontsize: 12
-        ylabel: Total Reward [-]
+        ylabel: Learning Return [-]
         ylabel_fontsize: 12
         xmin: null
         xmax: null
@@ -74,17 +74,17 @@ visualization:
       source: summary
       x_variable: episode_id
       y_variables:
-        - {variable: total_reward_pendulum_angle, label: Pendulum angle, color: "#0077BB"}
-        - {variable: total_reward_cart_position, label: Cart position, color: "#EE7733"}
-      output_filename: fig2a_controller_reward_per_episode.png
+        - {variable: total_learning_return_pendulum_angle, label: Pendulum angle, color: "#0077BB"}
+        - {variable: total_learning_return_cart_position, label: Cart position, color: "#EE7733"}
+      output_filename: fig2a_controller_learning_return_per_episode.png
       config:
-        title: Controller Rewards per Episode
+        title: Controller Learning Returns per Episode
         title_fontsize: 14
         figsize_w: 12
         figsize_h: 6
         xlabel: Episode [-]
         xlabel_fontsize: 12
-        ylabel: Controller Reward [-]
+        ylabel: Learning Return [-]
         ylabel_fontsize: 12
         xmin: null
         xmax: null
@@ -139,16 +139,16 @@ visualization:
       enabled: true
       source: summary
       x_variable: episode_id
-      y_variable: performance
-      output_filename: fig4_performance_per_episode.png
+      y_variable: learning_return_rate
+      output_filename: fig4_learning_return_rate_per_episode.png
       config:
-        title: Performance per Episode
+        title: Learning Return Rate per Episode
         title_fontsize: 14
         figsize_w: 12
         figsize_h: 6
         xlabel: Episode [-]
         xlabel_fontsize: 12
-        ylabel: Performance [-/s]
+        ylabel: Learning Return Rate [-/s]
         ylabel_fontsize: 12
         xmin: null
         xmax: null
@@ -174,7 +174,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: pendulum_angle_raw
-      value_variable: t_sec
       output_filename: fig5_heatmap_time_vs_pendulum_angle.png
       config:
         aggregation: count
@@ -210,7 +209,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: pendulum_angle_raw
-      value_variable: t_sec
       output_filename: fig6_heatmap_time_vs_pendulum_angle_stabilization_success.png
       config:
         aggregation: count
@@ -246,7 +244,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: pendulum_velocity_raw
-      value_variable: t_sec
       output_filename: fig7_heatmap_time_vs_pendulum_velocity.png
       config:
         aggregation: count
@@ -282,7 +279,6 @@ visualization:
       source: detailed
       x_variable: pendulum_angle_raw
       y_variable: pendulum_velocity_raw
-      value_variable: pendulum_angle_raw
       output_filename: fig8_heatmap_pendulum_angle_vs_pendulum_velocity.png
       config:
         aggregation: count
@@ -318,7 +314,6 @@ visualization:
       source: detailed
       x_variable: cart_position_raw
       y_variable: cart_velocity_raw
-      value_variable: cart_position_raw
       output_filename: fig8_heatmap_cart_position_vs_cart_velocity.png
       config:
         aggregation: count
@@ -354,7 +349,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: cart_position_raw
-      value_variable: t_sec
       output_filename: fig9_heatmap_time_vs_cart_position.png
       config:
         aggregation: count
@@ -390,7 +384,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: cart_position_raw
-      value_variable: t_sec
       output_filename: fig10_heatmap_time_vs_cart_position_stabilization_success.png
       config:
         aggregation: count
@@ -426,7 +419,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: cart_velocity_raw
-      value_variable: t_sec
       output_filename: fig10_heatmap_time_vs_cart_velocity_stabilization_success.png
       config:
         aggregation: count
@@ -462,7 +454,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: cart_velocity_raw
-      value_variable: t_sec
       output_filename: fig11_heatmap_time_vs_cart_velocity.png
       config:
         aggregation: count
@@ -498,7 +489,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: u_alloc_pendulum_angle_raw
-      value_variable: t_sec
       output_filename: fig12a_heatmap_time_vs_pendulum_u_alloc.png
       config:
         aggregation: count
@@ -534,7 +524,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: u_alloc_pendulum_angle_raw
-      value_variable: t_sec
       output_filename: fig12_heatmap_time_vs_pendulum_u_alloc_stabilization_success.png
       config:
         aggregation: count
@@ -570,7 +559,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: u_total
-      value_variable: t_sec
       output_filename: fig12b_heatmap_time_vs_u_total.png
       config:
         aggregation: count
@@ -606,7 +594,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: u_total
-      value_variable: t_sec
       output_filename: fig12a_heatmap_time_vs_u_total_stabilization_success.png
       config:
         aggregation: count
@@ -642,7 +629,6 @@ visualization:
       source: detailed
       x_variable: t_sec
       y_variable: cart_force
-      value_variable: t_sec
       output_filename: fig12c_heatmap_time_vs_cart_force.png
       config:
         aggregation: count

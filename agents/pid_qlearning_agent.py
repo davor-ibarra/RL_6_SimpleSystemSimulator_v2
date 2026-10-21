@@ -29,6 +29,7 @@ class GainAgent:
     additional_state_specs: tuple
     additional_state_counts: tuple
     action_array: np.ndarray
+    is_exploratory_array: np.ndarray
     reward_array: np.ndarray
     gain_value_array: np.ndarray
     td_error_array: np.ndarray
@@ -194,7 +195,7 @@ def _unflatten_state_idx(state_idx, gain_state_count, additional_state_counts):
 
 
 class PIDQLearningAgent:
-    def __init__(self, runtime, agent_config, control_config, seed=12345):
+    def __init__(self, runtime, agent_config, control_config, seed):
         self.interval = runtime.interval
         self.params = agent_config["params"]
         self.algorithm = self.params["algorithm"]
@@ -269,6 +270,7 @@ class PIDQLearningAgent:
                     additional_state_specs=additional_state_specs,
                     additional_state_counts=additional_state_counts,
                     action_array=getattr(self.interval, f"action_{agent_id}"),
+                    is_exploratory_array=getattr(self.interval, f"is_exploratory_{agent_id}"),
                     reward_array=getattr(self.interval, f"reward_for_learning_{agent_id}"),
                     gain_value_array=getattr(self.interval, f"gain_value_{agent_id}"),
                     td_error_array=getattr(self.interval, f"td_error_{agent_id}"),
@@ -283,7 +285,8 @@ class PIDQLearningAgent:
                 )
             )
 
-        self.rng = np.random.default_rng(seed)
+        self.seed = int(seed)
+        self.rng = np.random.default_rng(self.seed)
 
     def reset_episode(self):
         for track in self.tracks:
@@ -320,12 +323,15 @@ class PIDQLearningAgent:
             track.episode_visited_state_indices.add(track.current_state_idx)
             if self.rng.random() < self.epsilon:
                 action_idx = self.random_action_idx()
+                is_exploratory = 1.0
             else:
                 q_values = track.q_table[track.current_state_idx]
                 action_idx = self.select_greedy_action_idx(q_values)
+                is_exploratory = 0.0
             track.last_state_idx = track.current_state_idx
             track.last_action_idx = action_idx
             track.action_array[interval_idx] = self.action_moves[action_idx]
+            track.is_exploratory_array[interval_idx] = is_exploratory
 
     def learn(self, interval_idx, terminal_for_learning):
         for track in self.tracks:
@@ -390,8 +396,15 @@ class PIDQLearningAgent:
                 {
                     "agent_id": track.agent_id,
                     "q_delta_rms": q_delta_rms,
+                    "q_value_mean": float(np.mean(track.q_table)),
+                    "q_value_std": float(np.std(track.q_table)),
+                    "q_value_min": float(np.min(track.q_table)),
+                    "q_value_max": float(np.max(track.q_table)),
                     "policy_stability": float(stable_state_count / len(visited_state_indices)),
                     "visited_state_count": len(visited_state_indices),
+                    "visited_state_frequency": float(
+                        len(visited_state_indices) / track.q_table.shape[0]
+                    ),
                 }
             )
         return metrics

@@ -1,10 +1,47 @@
+# Python caches and generated packages
 __pycache__/
 *.py[cod]
 .pytest_cache/
-analysis/
-results_history_CartPole/
-results_smoke/
-tests/
-!tests/
-tests/*
-!tests/test_metric_report.py
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+/build/
+/dist/
+
+# Local environments and coverage output
+/.venv/
+/venv/
+/env/
+.coverage
+.coverage.*
+/htmlcov/
+/coverage.xml
+
+# Simulation output and experiment history
+/output/
+/outputs/
+/results/
+/results_*/
+
+# Research analyses and article preparation
+/analysis/
+# Local specifications, documentation and tests
+/docs/
+/tests/
+/GLOSSARY.md
+
+# Local authoring tools and agent work files
+/.archify/
+/.codex-ppt-work/
+/.scratch/
+/tmp_*.py
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.log
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

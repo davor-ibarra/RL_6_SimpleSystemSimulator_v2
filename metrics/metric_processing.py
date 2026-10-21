@@ -68,6 +68,21 @@ def _transform_values(values, transform_config):
         lower = float(transform_config["min"])
         upper = float(transform_config["max"])
         return np.clip(values, lower, upper)
+    if method == "positive_product":
+        source_values = np.asarray(values, dtype=np.float64)
+        if source_values.ndim != 2 or source_values.shape[0] != 2:
+            raise ValueError("positive_product transform requires exactly two sources")
+        return np.maximum(0.0, source_values[0] * source_values[1])
+    if method == "outside_abs_bounds":
+        source_values = np.asarray(values, dtype=np.float64)
+        if source_values.ndim != 2:
+            raise ValueError("outside_abs_bounds transform requires multiple sources")
+        bounds = np.asarray(transform_config["bounds"], dtype=np.float64)
+        if bounds.ndim != 1 or len(bounds) != source_values.shape[0]:
+            raise ValueError("outside_abs_bounds requires one bound per source")
+        if not np.all(np.isfinite(bounds)) or np.any(bounds <= 0.0):
+            raise ValueError("outside_abs_bounds bounds must be finite and positive")
+        return np.any(np.abs(source_values) > bounds[:, None], axis=0).astype(np.float64)
     raise ValueError(f"Unsupported metric transform: {method}")
 
 
@@ -301,7 +316,7 @@ class MetricProcessor:
         self.dt_sec = float(dt_sec)
         self.previous_source_values = {}
         for metric_config in self.interval_metrics:
-            if "sources" in metric_config:
+            if metric_config["interval_reduce"]["method"] == "oriented_rate_alignment":
                 self.previous_source_values[metric_config["raw_target"]] = None
 
         if float(self.output_limits[0]) != 0.0 or float(self.output_limits[1]) != 1.0:
@@ -318,19 +333,62 @@ class MetricProcessor:
             raise ValueError("end_step_idx must be greater than or equal to start_step_idx")
 
         interval_duration_sec = _interval_duration_sec(start_step_idx, end_step_idx, self.dt_sec)
+        step_slice = slice(start_step_idx, end_step_idx + 1)
+        self.interval.interval_mean_abs_error_pendulum_angle_raw[interval_idx] = float(
+            np.mean(np.abs(self.step.error_pendulum_angle_raw[step_slice]))
+        )
+        self.interval.interval_mean_abs_error_cart_position_raw[interval_idx] = float(
+            np.mean(np.abs(self.step.error_cart_position_raw[step_slice]))
+        )
+        self.interval.interval_rms_pendulum_velocity_raw[interval_idx] = float(
+            np.sqrt(np.mean(self.step.pendulum_velocity_raw[step_slice] ** 2))
+        )
+        self.interval.interval_rms_cart_velocity_raw[interval_idx] = float(
+            np.sqrt(np.mean(self.step.cart_velocity_raw[step_slice] ** 2))
+        )
+        self.interval.interval_control_mean_square[interval_idx] = float(
+            np.mean(self.step.u_total[step_slice] ** 2)
+        )
+        self.interval.interval_saturation_frequency[interval_idx] = float(
+            np.mean(self.step.is_saturated_global[step_slice] != 0.0)
+        )
 
         for metric_config in self.interval_metrics:
             if metric_config["interval_reduce"]["method"] == "oriented_rate_alignment":
                 self.aggregate_oriented_rate_alignment(metric_config, interval_idx)
                 continue
 
-            source_array, source_scope = _resolve_source(self.step, self.interval, metric_config["source"])
-            source_values = _source_values(source_array, source_scope, interval_idx, start_step_idx, end_step_idx)
-            _finite_array(source_values, metric_config["source"])
+            source_names = metric_config.get("sources")
+            if source_names is None:
+                source_names = [metric_config["source"]]
+
+            source_value_rows = []
+            source_scope = None
+            for source_name in source_names:
+                source_array, current_scope = _resolve_source(self.step, self.interval, source_name)
+                if source_scope is None:
+                    source_scope = current_scope
+                elif current_scope != source_scope:
+                    raise ValueError("metric sources must have the same scope")
+                current_values = _source_values(
+                    source_array,
+                    current_scope,
+                    interval_idx,
+                    start_step_idx,
+                    end_step_idx,
+                )
+                _finite_array(current_values, source_name)
+                source_value_rows.append(current_values)
+
+            if len(source_value_rows) == 1:
+                source_values = source_value_rows[0]
+            else:
+                source_values = np.stack(source_value_rows, axis=0)
+            source_label = ", ".join(source_names)
 
             sample_transform_config = metric_config["sample_transform"]
             transformed_values = _transform_values(source_values, sample_transform_config)
-            _finite_array(transformed_values, metric_config["source"])
+            _finite_array(transformed_values, source_label)
             if "audit_target" in sample_transform_config:
                 audit_array = getattr(self.step, sample_transform_config["audit_target"])
                 audit_array[start_step_idx : end_step_idx + 1] = transformed_values
@@ -361,7 +419,7 @@ class MetricProcessor:
                 self.dt_sec,
                 denominator_values,
             )
-            _finite_scalar(reduced_value, metric_config["source"])
+            _finite_scalar(reduced_value, source_label)
 
             if "audit_target" in interval_reduce_config:
                 getattr(self.interval, interval_reduce_config["audit_target"])[interval_idx] = reduced_value
