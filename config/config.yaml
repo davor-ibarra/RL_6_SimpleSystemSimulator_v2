@@ -242,8 +242,11 @@
     },
     "cooperative": {
       "enabled": true,
-      "mode": "norm-p",
-      "p": 50.0,                             # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
+      "mode": "geometric_consensus",                       # "norm-p" | "geometric_consensus"
+      "reward_mode": "progress_residual",              # "absolute" | "progress" | "progress_residual"
+      "p": 500.0,                             # p=1 simple weighted | p=2 RMS weighted | p>2 more aggressive
+      "epsilon_geom_conc": 1.0e-8,
+      "residual_weight": 0.005,
       "variable_weights": {
         "pendulum_angle": 0.7,
         "cart_position": 0.3
@@ -351,6 +354,8 @@
         "cost_delta_u_total_01",
         "cooperative_cost_01",
         "cooperative_reward_signed",
+        "cooperative_potential_01",
+        "delta_cooperative_potential_signed",
         "reward_global_signed",
         "global_interval_reward",
         "reward_controller_pendulum_angle",

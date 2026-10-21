@@ -187,7 +187,7 @@ visualization:
         ylabel: Pendulum Angle [rad]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -0.34
         ymax: 0.34
         tick_fontsize: 24
@@ -223,7 +223,7 @@ visualization:
         ylabel: Pendulum Angle [rad]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -0.34
         ymax: 0.34
         tick_fontsize: 24
@@ -259,7 +259,7 @@ visualization:
         ylabel: Pendulum Velocity [rad/s]
         ylabel_fontsize: 16
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -0.25
         ymax: 0.25
         tick_fontsize: 14
@@ -367,7 +367,7 @@ visualization:
         ylabel: Cart Position [m]
         ylabel_fontsize: 16
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -2.0
         ymax: 2.0
         tick_fontsize: 14
@@ -403,7 +403,7 @@ visualization:
         ylabel: Cart Position [m]
         ylabel_fontsize: 16
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: null
         ymax: null
         tick_fontsize: 14
@@ -439,7 +439,7 @@ visualization:
         ylabel: Cart Velocity [m/s]
         ylabel_fontsize: 16
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: null
         ymax: null
         tick_fontsize: 14
@@ -475,7 +475,7 @@ visualization:
         ylabel: Cart Velocity [m/s]
         ylabel_fontsize: 16
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -1.5
         ymax: 1.5
         tick_fontsize: 14
@@ -511,7 +511,7 @@ visualization:
         ylabel: Pendulum allocated control [-]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -1.0
         ymax: 1.0
         tick_fontsize: 24
@@ -547,7 +547,7 @@ visualization:
         ylabel: Pendulum allocated control [-]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -1.0
         ymax: 1.0
         tick_fontsize: 24
@@ -583,7 +583,7 @@ visualization:
         ylabel: Total control action [-]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -1.0
         ymax: 1.0
         tick_fontsize: 24
@@ -619,7 +619,7 @@ visualization:
         ylabel: Total control action [-]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -1.0
         ymax: 1.0
         tick_fontsize: 24
@@ -655,7 +655,7 @@ visualization:
         ylabel: Cart force [N]
         ylabel_fontsize: 28
         xmin: 0
-        xmax: 5
+        xmax: null
         ymin: -30.0
         ymax: 30.0
         tick_fontsize: 24

@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 
 
-SUPPORTED_COOPERATIVE_MODES = ("norm-p",)
+SUPPORTED_COOPERATIVE_MODES = ("norm-p", "geometric_consensus")
+SUPPORTED_COOPERATIVE_REWARD_MODES = ("absolute", "progress", "progress_residual")
 
 
 @dataclass(frozen=True)
@@ -106,15 +107,43 @@ class RewardCalculator:
         self.cooperative_enabled = bool(cooperative_config["enabled"])
         self.cooperative_mode = cooperative_config["mode"]
         if self.cooperative_mode not in SUPPORTED_COOPERATIVE_MODES:
-            raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_mode}")
+            raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
+        self.cooperative_reward_mode = cooperative_config["reward_mode"]
+        if self.cooperative_reward_mode not in SUPPORTED_COOPERATIVE_REWARD_MODES:
+            raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_reward_mode}")
+        if not self.cooperative_enabled and self.cooperative_weight != 0.0:
+            raise ValueError("cooperative reward disabled with non-zero cooperative composition weight")
+
         self.cooperative_p = float(cooperative_config["p"])
+        self.epsilon_geom_conc = float(cooperative_config["epsilon_geom_conc"])
+        self.residual_weight = float(cooperative_config["residual_weight"])
         if not np.isfinite(self.cooperative_p):
             raise ValueError("cooperative p must be finite")
-        if self.cooperative_p < 1.0:
+        if not np.isfinite(self.epsilon_geom_conc):
+            raise ValueError("cooperative epsilon_geom_conc must be finite")
+        if not np.isfinite(self.residual_weight):
+            raise ValueError("cooperative residual_weight must be finite")
+        if self.cooperative_mode == "norm-p" and self.cooperative_p < 1.0:
             raise ValueError("cooperative p must be greater than or equal to 1.0")
+        if self.cooperative_mode == "geometric_consensus" and not 0.0 < self.epsilon_geom_conc < 1.0:
+            raise ValueError("cooperative epsilon_geom_conc must be greater than 0 and less than 1")
+        if self.cooperative_reward_mode == "progress_residual" and self.residual_weight < 0.0:
+            raise ValueError("cooperative residual_weight must be non-negative")
         self.cooperative_weights = cooperative_config["variable_weights"]
+        if len(self.cooperative_weights) != len(self.local_tracks):
+            raise ValueError("cooperative variable_weights must match local controllers exactly")
+        for cooperative_controller_id in self.cooperative_weights:
+            matched_local_controller = False
+            for local_track in self.local_tracks:
+                if cooperative_controller_id == local_track.controller_id:
+                    matched_local_controller = True
+            if not matched_local_controller:
+                raise ValueError(f"Unknown cooperative variable_weight controller: {cooperative_controller_id}")
+
         cooperative_sum = 0.0
         for local_track in self.local_tracks:
+            if local_track.controller_id not in self.cooperative_weights:
+                raise ValueError(f"Missing cooperative variable_weight controller: {local_track.controller_id}")
             cooperative_weight = float(self.cooperative_weights[local_track.controller_id])
             if not np.isfinite(cooperative_weight):
                 raise ValueError("cooperative variable_weights must be finite")
@@ -146,6 +175,8 @@ class RewardCalculator:
             raise ValueError(f"Unsupported reward assignment: {self.assignment}")
 
         self.strategic_reward_signed = 0.0
+        self.previous_cooperative_potential = 0.0
+        self.has_previous_cooperative_potential = False
 
         self.terminal_bonus_config = reward_config["terminal_learning_bonus"]
         self.terminal_bonus_enabled = bool(self.terminal_bonus_config["enabled"])
@@ -159,6 +190,8 @@ class RewardCalculator:
     def reset_episode(self):
         self.strategic_reward_signed = 0.0
         self.terminal_bonus = 0.0
+        self.previous_cooperative_potential = 0.0
+        self.has_previous_cooperative_potential = False
 
     def evaluate_interval(self, interval_idx):
         self.terminal_learning_bonus(interval_idx)
@@ -180,28 +213,70 @@ class RewardCalculator:
 
     def compute_cooperative_reward(self, interval_idx):
         if self.cooperative_enabled:
-            cooperative_cost = self.compute_cooperative_cost(interval_idx)
-            cooperative_cost = _clip_01(cooperative_cost)
+            cooperative_potential = self.compute_cooperative_potential(interval_idx)
+            cooperative_cost = _clip_01(1.0 - cooperative_potential)
+            delta_cooperative_potential = self.compute_delta_cooperative_potential(cooperative_potential)
+            cooperative_reward = self.transform_cooperative_reward(
+                cooperative_potential,
+                delta_cooperative_potential,
+            )
         else:
+            cooperative_potential = 1.0
             cooperative_cost = 0.0
-        cooperative_reward = _reward_from_cost(cooperative_cost)
+            delta_cooperative_potential = 0.0
+            cooperative_reward = 0.0
         self.interval.cooperative_cost_01[interval_idx] = cooperative_cost
+        self.interval.cooperative_potential_01[interval_idx] = cooperative_potential
+        self.interval.delta_cooperative_potential_signed[interval_idx] = delta_cooperative_potential
         self.interval.cooperative_reward_signed[interval_idx] = cooperative_reward
 
     def compute_cooperative_cost(self, interval_idx):
+        cooperative_potential = self.compute_cooperative_potential(interval_idx)
+        return _clip_01(1.0 - cooperative_potential)
+
+    def compute_cooperative_potential(self, interval_idx):
         if self.cooperative_mode == "norm-p":
-            return self.compute_norm_p_cooperative_cost(interval_idx)
-        raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_mode}")
+            cooperative_cost = self.compute_norm_p_cooperative_cost(interval_idx)
+            return _clip_01(1.0 - cooperative_cost)
+        if self.cooperative_mode == "geometric_consensus":
+            return self.compute_geometric_consensus_potential(interval_idx)
+        raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
 
     def compute_norm_p_cooperative_cost(self, interval_idx):
         cooperative_cost_power = 0.0
         for local_track in self.local_tracks:
-            local_cost = float(local_track.local_cost_array[interval_idx])
+            local_cost = _clip_01(float(local_track.local_cost_array[interval_idx]))
             cooperative_cost_power += (
                 float(self.cooperative_weights[local_track.controller_id])
                 * (local_cost ** self.cooperative_p)
             )
         return float(cooperative_cost_power ** (1.0 / self.cooperative_p))
+
+    def compute_geometric_consensus_potential(self, interval_idx):
+        log_potential = 0.0
+        for local_track in self.local_tracks:
+            local_cost = _clip_01(float(local_track.local_cost_array[interval_idx]))
+            local_remaining = max(self.epsilon_geom_conc, 1.0 - local_cost)
+            log_potential += float(self.cooperative_weights[local_track.controller_id]) * np.log(local_remaining)
+        return _clip_01(float(np.exp(log_potential)))
+
+    def compute_delta_cooperative_potential(self, cooperative_potential):
+        if not self.has_previous_cooperative_potential:
+            self.previous_cooperative_potential = cooperative_potential
+            self.has_previous_cooperative_potential = True
+        delta_cooperative_potential = cooperative_potential - self.previous_cooperative_potential
+        self.previous_cooperative_potential = cooperative_potential
+        return _clip_signed(float(delta_cooperative_potential))
+
+    def transform_cooperative_reward(self, cooperative_potential, delta_cooperative_potential):
+        if self.cooperative_reward_mode == "absolute":
+            return _clip_signed(2.0 * cooperative_potential - 1.0)
+        if self.cooperative_reward_mode == "progress":
+            return _clip_signed(delta_cooperative_potential)
+        if self.cooperative_reward_mode == "progress_residual":
+            cooperative_residual = 1.0 - cooperative_potential
+            return _clip_signed(delta_cooperative_potential - self.residual_weight * cooperative_residual)
+        raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_reward_mode}")
 
     def compute_strategic_reward(self, interval_idx):
         del interval_idx

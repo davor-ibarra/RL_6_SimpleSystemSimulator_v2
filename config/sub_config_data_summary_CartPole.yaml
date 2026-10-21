@@ -156,6 +156,10 @@ data_summary:
       stats: [mean, min, p25, p50, p75, max]
     - source: cooperative_reward_signed
       stats: [mean, min, p25, p50, p75, max]
+    - source: cooperative_potential_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: delta_cooperative_potential_signed
+      stats: [mean, std, min, p25, p50, p75, max]
     - source: reward_controller_pendulum_angle
       stats: [mean, sum, min, p25, p50, p75, max]
     - source: reward_controller_cart_position

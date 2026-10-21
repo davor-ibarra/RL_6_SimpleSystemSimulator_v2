@@ -50,6 +50,8 @@ BASE_INTERVAL_SIGNALS = [
     "termination_reason_code",
     "cooperative_cost_01",
     "cooperative_reward_signed",
+    "cooperative_potential_01",
+    "delta_cooperative_potential_signed",
     "reward_global_signed",
     "global_interval_reward",
 ]
