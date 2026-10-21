@@ -3,8 +3,17 @@ from dataclasses import dataclass
 import numpy as np
 
 
-SUPPORTED_COOPERATIVE_MODES = ("norm-p", "geometric_consensus")
-SUPPORTED_COOPERATIVE_REWARD_MODES = ("absolute", "progress", "progress_residual")
+SUPPORTED_COOPERATIVE_MODES = ("norm-p", "geometric_consensus", "concurrent_progress")
+SUPPORTED_COOPERATIVE_REWARD_MODES = ("absolute", "progress", "progress_residual", "regime_residual")
+SUPPORTED_REGIME_REWARD_MODES = ("absolute", "progress", "progress_residual")
+SUPPORTED_MONOTONIC_REWARD_MODES = ("absolute", "potential_base")
+SUPPORTED_COOPERATIVE_TYPES = (
+    "factorial_cooperative",
+    "intensity_compensability_cooperative",
+    "potential_cooperative",
+    "monotonic_cooperative",
+)
+SUPPORTED_FACTORIAL_COMPOSITION_MODES = ("standard", "common_progress")
 
 
 @dataclass(frozen=True)
@@ -17,9 +26,42 @@ class LocalRewardComponent:
 class LocalRewardTrack:
     controller_id: str
     components: tuple[LocalRewardComponent, ...]
-    local_cost_array: object
-    local_reward_array: object
-    reward_controller_array: object
+    cost_array: object
+    health_array: object
+    reward_array: object
+    controller_reward_array: object
+
+
+@dataclass(frozen=True)
+class CooperativeVariableTrack:
+    variable_id: str
+    potential_source_array: object
+    need_cost_array: object
+    balance_health_array: object
+    nominal_weight: float
+    need_array: object
+    effective_weight_array: object
+
+
+@dataclass(frozen=True)
+class RelationalVariableTrack:
+    variable_id: str
+    health_array: object
+
+
+@dataclass(frozen=True)
+class MonotonicVariableTrack:
+    variable_id: str
+    cost_array: object
+    weight: float
+
+
+@dataclass(frozen=True)
+class PostComposePenaltyTrack:
+    variable_id: str
+    cost_array: object
+    weight: float
+    contribution_array: object
 
 
 @dataclass(frozen=True)
@@ -28,6 +70,14 @@ class AgentRewardTrack:
     controller_id: str
     reward_agent_array: object
     reward_for_learning_array: object
+
+
+@dataclass(frozen=True)
+class TerminalBonusTrack:
+    controller_id: str
+    bonus_array: object
+    qualified_array: object
+    eligible_array: object
 
 
 def _clip_01(value):
@@ -46,39 +96,99 @@ def _reward_from_cost(cost_01):
     return _clip_signed(1.0 - 2.0 * _clip_01(cost_01))
 
 
+def _normalize_signed_utility(value, enabled, normalization_value):
+    if not enabled:
+        return value
+    return _clip_signed(value / normalization_value)
+
+
 class RewardCalculator:
     def __init__(self, runtime, reward_config, agent_config, termination_config):
         self.interval = runtime.interval
         self.assignment = reward_config["assignment"]
+        self.discount_factor = float(
+            agent_config.get("params", {}).get("discount_factor", 1.0)
+        )
         if reward_config["domain"] != "signed_unit":
             raise ValueError("Only signed_unit reward domain is supported")
 
-        weights = reward_config["composition"]["weights"]
-        self.local_weight = float(weights["local"])
-        self.cooperative_weight = float(weights["cooperative"])
-        self.strategic_weight = float(weights["strategic"])
-        if (
-            not np.isfinite(self.local_weight)
-            or not np.isfinite(self.cooperative_weight)
-            or not np.isfinite(self.strategic_weight)
-        ):
-            raise ValueError("reward composition weights must be finite")
-        if self.local_weight < 0.0 or self.cooperative_weight < 0.0 or self.strategic_weight < 0.0:
-            raise ValueError("reward composition weights must be non-negative")
-        weight_sum = self.local_weight + self.cooperative_weight + self.strategic_weight
-        if abs(weight_sum - 1.0) > 1e-9:
-            raise ValueError("reward composition weights must sum to 1.0")
+        self.build_local_tracks(reward_config["local"])
+        self.build_cooperative_tracks(reward_config["cooperative"])
+        self.configure_composition(reward_config["composition"])
+        self.build_agent_tracks(agent_config)
+        self.configure_assignment()
 
         self.strategic_enabled = bool(reward_config["strategic"]["enabled"])
         if self.strategic_enabled and self.strategic_weight <= 0.0:
             raise ValueError("strategic reward enabled with zero strategic weight")
+        self.strategic_reward_signed = 0.0
 
+        self.previous_cooperative_potential = 0.0
+        self.has_previous_cooperative_potential = False
+        self.previous_monotonic_utility = 0.0
+        self.has_previous_monotonic_utility = False
+        self.previous_variable_costs = {}
+        self.previous_variable_needs = {}
+        self.previous_variable_healths = {}
+        self.has_previous_variable_healths = False
+        self.previous_relational_healths = {}
+        self.has_previous_relational_healths = False
+        for variable_track in self.cooperative_variables:
+            self.previous_variable_costs[variable_track.variable_id] = 0.0
+            self.previous_variable_needs[variable_track.variable_id] = 0.0
+            self.previous_variable_healths[variable_track.variable_id] = 0.0
+        for variable_track in self.relational_variables:
+            self.previous_relational_healths[variable_track.variable_id] = 0.0
+
+        learning_normalization_config = reward_config["learning_reward_normalization"]
+        self.learning_reward_normalization_enabled = bool(
+            learning_normalization_config["enabled"]
+        )
+        try:
+            self.learning_reward_normalization_value = float(
+                learning_normalization_config["normalization_value"]
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "learning reward normalization_value must be finite and positive"
+            ) from None
+        if (
+            not np.isfinite(self.learning_reward_normalization_value)
+            or self.learning_reward_normalization_value <= 0.0
+        ):
+            raise ValueError(
+                "learning reward normalization_value must be finite and positive"
+            )
+
+        terminal_bonus_config = reward_config["terminal_learning_bonus"]
+        self.terminal_bonus_enabled = bool(terminal_bonus_config["enabled"])
+        self.terminal_bonus_mode = terminal_bonus_config["mode"]
+        self.terminal_bonus_by_reason = terminal_bonus_config["bonus_values"]
+        self.terminal_bonus_tracks = {}
+        for local_track in self.local_tracks:
+            controller_id = local_track.controller_id
+            self.terminal_bonus_tracks[controller_id] = TerminalBonusTrack(
+                controller_id=controller_id,
+                bonus_array=getattr(self.interval, f"terminal_bonus_{controller_id}"),
+                qualified_array=getattr(self.interval, f"terminal_band_qualified_{controller_id}"),
+                eligible_array=getattr(self.interval, f"terminal_bonus_eligible_{controller_id}"),
+            )
+        self.reason_name_by_code = {}
+        for reason_name, reason_code in termination_config["reason_codes"].items():
+            self.reason_name_by_code[int(reason_code)] = reason_name
+
+    def build_local_tracks(self, local_config):
         self.local_tracks = []
-        for local_config in reward_config["local"]["controllers"]:
-            controller_id = local_config["controller"]
+        seen_controller_ids = set()
+        for controller_config in local_config["controllers"]:
+            controller_id = controller_config["controller"]
+            if controller_id in seen_controller_ids:
+                raise ValueError(f"Duplicate local reward controller: {controller_id}")
+            seen_controller_ids.add(controller_id)
+
             components = []
             component_weight_sum = 0.0
-            for component_config in local_config["components"]:
+            for component_config in controller_config["components"]:
                 component_weight = float(component_config["weight"])
                 if not np.isfinite(component_weight):
                     raise ValueError("local reward component weights must be finite")
@@ -93,29 +203,255 @@ class RewardCalculator:
                 )
             if abs(component_weight_sum - 1.0) > 1e-9:
                 raise ValueError("local reward component weights must sum to 1.0")
+
             self.local_tracks.append(
                 LocalRewardTrack(
                     controller_id=controller_id,
                     components=tuple(components),
-                    local_cost_array=getattr(self.interval, f"local_cost_01_{controller_id}"),
-                    local_reward_array=getattr(self.interval, f"local_reward_signed_{controller_id}"),
-                    reward_controller_array=getattr(self.interval, f"reward_controller_{controller_id}"),
+                    cost_array=getattr(self.interval, f"local_cost_01_{controller_id}"),
+                    health_array=getattr(self.interval, f"local_health_01_{controller_id}"),
+                    reward_array=getattr(self.interval, f"local_reward_signed_{controller_id}"),
+                    controller_reward_array=getattr(self.interval, f"reward_controller_{controller_id}"),
+                )
+            )
+        if len(self.local_tracks) == 0:
+            raise ValueError("local reward must declare at least one controller")
+
+    def index_source_configs(self, variable_configs, label):
+        source_config_by_id = {}
+        for variable_config in variable_configs:
+            variable_id = variable_config["id"]
+            if variable_id in source_config_by_id:
+                raise ValueError(f"Duplicate {label} variable id: {variable_id}")
+            source_config_by_id[variable_id] = variable_config
+        return source_config_by_id
+
+    def build_cooperative_tracks(self, cooperative_config):
+        self.cooperative_enabled = bool(cooperative_config["enabled"])
+        self.cooperative_type = cooperative_config["type"]
+        if self.cooperative_type not in SUPPORTED_COOPERATIVE_TYPES:
+            raise ValueError(f"Unsupported cooperative type: {self.cooperative_type}")
+
+        self.cooperative_variables = []
+        self.relational_variables = ()
+        self.regime_array = None
+
+        if not self.cooperative_enabled:
+            if self.cooperative_type == "factorial_cooperative":
+                variables = cooperative_config["factorial_cooperative"]["variables"]
+            elif self.cooperative_type == "intensity_compensability_cooperative":
+                variables = cooperative_config["intensity_compensability_cooperative"][
+                    "variables"
+                ]
+            elif self.cooperative_type == "potential_cooperative":
+                variables = cooperative_config["potential_cooperative"]["potential"][
+                    "variables"
+                ]
+            else:
+                variables = cooperative_config["monotonic_cooperative"]["variables"]
+            self.build_relational_tracks(variables)
+            return
+
+        if self.cooperative_type == "factorial_cooperative":
+            self.build_factorial_cooperative(cooperative_config["factorial_cooperative"])
+        elif self.cooperative_type == "intensity_compensability_cooperative":
+            self.build_intensity_compensability_cooperative(
+                cooperative_config["intensity_compensability_cooperative"]
+            )
+        elif self.cooperative_type == "potential_cooperative":
+            self.build_potential_cooperative(cooperative_config["potential_cooperative"])
+        elif self.cooperative_type == "monotonic_cooperative":
+            self.build_monotonic_cooperative(cooperative_config["monotonic_cooperative"])
+
+    def build_relational_tracks(self, variable_configs):
+        if len(variable_configs) != 2:
+            raise ValueError("cooperative relational families require exactly two variables")
+        local_tracks_by_id = {track.controller_id: track for track in self.local_tracks}
+        relational_variables = []
+        seen_ids = set()
+        for variable_config in variable_configs:
+            variable_id = variable_config["id"]
+            if variable_id in seen_ids:
+                raise ValueError(f"Duplicate cooperative relational variable: {variable_id}")
+            if variable_id not in local_tracks_by_id:
+                raise ValueError(f"Unknown cooperative relational variable: {variable_id}")
+            expected_source = f"local_health_01_{variable_id}"
+            if variable_config["health_source"] != expected_source:
+                raise ValueError(
+                    f"health_source for {variable_id} must be the canonical signal {expected_source}"
+                )
+            seen_ids.add(variable_id)
+            relational_variables.append(
+                RelationalVariableTrack(
+                    variable_id=variable_id,
+                    health_array=getattr(self.interval, variable_config["health_source"]),
+                )
+            )
+        if set(seen_ids) != set(local_tracks_by_id):
+            raise ValueError("cooperative relational variables must match local controllers exactly")
+        self.relational_variables = tuple(relational_variables)
+
+    def build_factorial_cooperative(self, factorial_config):
+        self.build_relational_tracks(factorial_config["variables"])
+        self.factorial_composition_mode = factorial_config["composition_mode"]
+        if self.factorial_composition_mode not in SUPPORTED_FACTORIAL_COMPOSITION_MODES:
+            raise ValueError(
+                f"Unsupported factorial composition mode: {self.factorial_composition_mode}"
+            )
+        absolute_config = factorial_config["absolute"]
+        balance_config = factorial_config["balance"]
+        synchrony_config = factorial_config["synchrony"]
+        differential_config = factorial_config["differential"]
+
+        self.factorial_absolute_weight = float(absolute_config["weight"])
+        self.factorial_balance_enabled = bool(balance_config["enabled"])
+        self.factorial_balance_weight = float(balance_config["weight"])
+        self.factorial_synchrony_enabled = bool(synchrony_config["enabled"])
+        self.factorial_synchrony_weight = float(synchrony_config["weight"])
+        self.factorial_differential_enabled = bool(differential_config["enabled"])
+        self.factorial_differential_weight = float(differential_config["weight"])
+        self.factorial_common_progress_weight = float(factorial_config["common_progress"]["weight"])
+
+        (
+            self.factorial_absolute_normalization_enabled,
+            self.factorial_absolute_normalization_value,
+        ) = self.read_factorial_normalization(absolute_config, "absolute")
+        (
+            self.factorial_balance_normalization_enabled,
+            self.factorial_balance_normalization_value,
+        ) = self.read_factorial_normalization(balance_config, "balance")
+        (
+            self.factorial_synchrony_normalization_enabled,
+            self.factorial_synchrony_normalization_value,
+        ) = self.read_factorial_normalization(synchrony_config, "synchrony")
+        (
+            self.factorial_differential_normalization_enabled,
+            self.factorial_differential_normalization_value,
+        ) = self.read_factorial_normalization(differential_config, "differential")
+
+        factorial_weights = (
+            self.factorial_absolute_weight,
+            self.factorial_balance_weight,
+            self.factorial_synchrony_weight,
+            self.factorial_differential_weight,
+            self.factorial_common_progress_weight,
+        )
+        if not all(np.isfinite(weight) for weight in factorial_weights):
+            raise ValueError("factorial cooperative weights must be finite")
+        if any(weight < 0.0 for weight in factorial_weights):
+            raise ValueError("factorial cooperative weights must be non-negative")
+        total_weight = (
+            self.factorial_absolute_weight
+            + self.factorial_balance_weight
+            + self.factorial_synchrony_weight
+            + self.factorial_differential_weight
+        )
+        if self.factorial_composition_mode == "common_progress":
+            total_weight += self.factorial_common_progress_weight
+        if total_weight > 1.0 + 1.0e-12:
+            raise ValueError("factorial cooperative weights must sum to at most 1.0")
+
+    def read_factorial_normalization(self, component_config, component_name):
+        enabled = bool(component_config["normalization_enabled"])
+        try:
+            value = float(component_config["normalization_value"])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"factorial {component_name} normalization_value must be finite and positive"
+            ) from None
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f"factorial {component_name} normalization_value must be finite and positive"
+            )
+        return enabled, value
+
+    def build_intensity_compensability_cooperative(self, intensity_config):
+        self.build_relational_tracks(intensity_config["variables"])
+        self.compensability_order = float(intensity_config["compensability_order"])
+        self.health_epsilon = float(intensity_config["health_epsilon"])
+        if not np.isfinite(self.compensability_order) or self.compensability_order < -1.0:
+            raise ValueError(
+                "compensability_order must be finite and greater than or equal to -1"
+            )
+        if not np.isfinite(self.health_epsilon) or not 0.0 < self.health_epsilon < 1.0:
+            raise ValueError("health_epsilon must be finite and between 0 and 1")
+        self.intensity_weights = {}
+        weight_sum = 0.0
+        for variable_config in intensity_config["variables"]:
+            weight = float(variable_config["weight"])
+            if not np.isfinite(weight) or weight <= 0.0:
+                raise ValueError("intensity compensability weights must be finite and positive")
+            self.intensity_weights[variable_config["id"]] = weight
+            weight_sum += weight
+        if abs(weight_sum - 1.0) > 1.0e-9:
+            raise ValueError("intensity compensability weights must sum to 1.0")
+
+    def build_monotonic_cooperative(self, monotonic_config):
+        self.monotonic_reward_mode = monotonic_config["reward_mode"]
+        if self.monotonic_reward_mode not in SUPPORTED_MONOTONIC_REWARD_MODES:
+            raise ValueError(f"Unsupported monotonic reward mode: {self.monotonic_reward_mode}")
+
+        self.build_relational_tracks(monotonic_config["variables"])
+        self.monotonic_minimum_health_weight = float(
+            monotonic_config["minimum_health_weight"]
+        )
+        self.monotonic_potential_weight = float(monotonic_config["potential_weight"])
+
+        self.monotonic_variables = []
+        variable_weight_sum = 0.0
+        for variable_config in monotonic_config["variables"]:
+            variable_weight = float(variable_config["weight"])
+            variable_weight_sum += variable_weight
+            self.monotonic_variables.append(
+                MonotonicVariableTrack(
+                    variable_id=variable_config["id"],
+                    cost_array=getattr(self.interval, variable_config["cost_source"]),
+                    weight=variable_weight,
+                )
+            )
+        if abs(variable_weight_sum - 1.0) > 1.0e-9:
+            raise ValueError("monotonic cooperative variable weights must sum to 1.0")
+        if not 0.0 <= self.monotonic_minimum_health_weight < 1.0:
+            raise ValueError("minimum_health_weight must be in [0, 1)")
+        if self.monotonic_potential_weight < 0.0:
+            raise ValueError("monotonic potential_weight must be non-negative")
+
+        penalty_config = monotonic_config["post_compose_penalty"]
+        self.post_compose_penalty_enabled = bool(penalty_config["enabled"])
+        self.post_compose_penalty_activation_value = float(
+            penalty_config["activation_value"]
+        )
+        if not 0.0 <= self.post_compose_penalty_activation_value < 1.0:
+            raise ValueError("post_compose_penalty activation_value must be in [0, 1)")
+
+        self.post_compose_penalty_tracks = []
+        for variable_config in penalty_config["variables"]:
+            variable_id = variable_config["id"]
+            self.post_compose_penalty_tracks.append(
+                PostComposePenaltyTrack(
+                    variable_id=variable_id,
+                    cost_array=getattr(self.interval, variable_config["cost_source"]),
+                    weight=float(variable_config["weight"]),
+                    contribution_array=getattr(
+                        self.interval,
+                        f"monotonic_post_compose_penalty_contribution_01_{variable_id}",
+                    ),
                 )
             )
 
-        cooperative_config = reward_config["cooperative"]
-        self.cooperative_enabled = bool(cooperative_config["enabled"])
-        self.cooperative_mode = cooperative_config["mode"]
-        if self.cooperative_mode not in SUPPORTED_COOPERATIVE_MODES:
-            raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
+    def build_potential_cooperative(self, cooperative_config):
         self.cooperative_reward_mode = cooperative_config["reward_mode"]
         if self.cooperative_reward_mode not in SUPPORTED_COOPERATIVE_REWARD_MODES:
             raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_reward_mode}")
-        if not self.cooperative_enabled and self.cooperative_weight != 0.0:
-            raise ValueError("cooperative reward disabled with non-zero cooperative composition weight")
 
-        self.cooperative_p = float(cooperative_config["p"])
-        self.epsilon_geom_conc = float(cooperative_config["epsilon_geom_conc"])
+        potential_config = cooperative_config["potential"]
+        self.build_relational_tracks(potential_config["variables"])
+        self.cooperative_mode = potential_config["method"]
+        if self.cooperative_mode not in SUPPORTED_COOPERATIVE_MODES:
+            raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
+        self.cooperative_p = float(potential_config["p"])
+        self.epsilon_geom_conc = float(potential_config["epsilon_geom_conc"])
+        self.deterioration_order = float(potential_config["deterioration_order"])
         self.residual_weight = float(cooperative_config["residual_weight"])
         if not np.isfinite(self.cooperative_p):
             raise ValueError("cooperative p must be finite")
@@ -127,32 +463,180 @@ class RewardCalculator:
             raise ValueError("cooperative p must be greater than or equal to 1.0")
         if self.cooperative_mode == "geometric_consensus" and not 0.0 < self.epsilon_geom_conc < 1.0:
             raise ValueError("cooperative epsilon_geom_conc must be greater than 0 and less than 1")
-        if self.cooperative_reward_mode == "progress_residual" and self.residual_weight < 0.0:
+        if self.residual_weight < 0.0:
             raise ValueError("cooperative residual_weight must be non-negative")
-        self.cooperative_weights = cooperative_config["variable_weights"]
-        if len(self.cooperative_weights) != len(self.local_tracks):
-            raise ValueError("cooperative variable_weights must match local controllers exactly")
-        for cooperative_controller_id in self.cooperative_weights:
-            matched_local_controller = False
-            for local_track in self.local_tracks:
-                if cooperative_controller_id == local_track.controller_id:
-                    matched_local_controller = True
-            if not matched_local_controller:
-                raise ValueError(f"Unknown cooperative variable_weight controller: {cooperative_controller_id}")
 
-        cooperative_sum = 0.0
-        for local_track in self.local_tracks:
-            if local_track.controller_id not in self.cooperative_weights:
-                raise ValueError(f"Missing cooperative variable_weight controller: {local_track.controller_id}")
-            cooperative_weight = float(self.cooperative_weights[local_track.controller_id])
-            if not np.isfinite(cooperative_weight):
-                raise ValueError("cooperative variable_weights must be finite")
-            if cooperative_weight < 0.0:
-                raise ValueError("cooperative variable_weights must be non-negative")
-            cooperative_sum += cooperative_weight
-        if abs(cooperative_sum - 1.0) > 1e-9:
-            raise ValueError("cooperative variable_weights must sum to 1.0")
+        adaptive_weights_config = cooperative_config["adaptive_weights"]
+        balance_config = cooperative_config["balance"]
+        synchrony_config = cooperative_config["synchrony"]
+        need_config_by_id = self.index_source_configs(
+            adaptive_weights_config["need_variables"],
+            "adaptive need",
+        )
+        health_config_by_id = self.index_source_configs(
+            balance_config["health_variables"],
+            "balance health",
+        )
 
+        potential_variable_configs = potential_config["variables"]
+        potential_ids = {variable_config["id"] for variable_config in potential_variable_configs}
+        if len(potential_ids) != len(potential_variable_configs):
+            raise ValueError("cooperative potential variable ids must be unique")
+        if set(need_config_by_id) != potential_ids:
+            raise ValueError("adaptive need variable ids must match cooperative potential variables exactly")
+        if set(health_config_by_id) != potential_ids:
+            raise ValueError("balance health variable ids must match cooperative potential variables exactly")
+
+        self.cooperative_variables = []
+        nominal_weight_sum = 0.0
+        for variable_config in potential_variable_configs:
+            variable_id = variable_config["id"]
+            nominal_weight = float(variable_config["weight"])
+            if not np.isfinite(nominal_weight):
+                raise ValueError("cooperative variable weights must be finite")
+            if nominal_weight < 0.0:
+                raise ValueError("cooperative variable weights must be non-negative")
+            nominal_weight_sum += nominal_weight
+            self.cooperative_variables.append(
+                CooperativeVariableTrack(
+                    variable_id=variable_id,
+                    potential_source_array=getattr(
+                        self.interval,
+                        variable_config[
+                            "cost_source"
+                            if self.cooperative_mode == "norm-p"
+                            else "health_source"
+                        ],
+                    ),
+                    need_cost_array=getattr(self.interval, need_config_by_id[variable_id]["source"]),
+                    balance_health_array=getattr(self.interval, health_config_by_id[variable_id]["source"]),
+                    nominal_weight=nominal_weight,
+                    need_array=getattr(self.interval, f"local_need_01_{variable_id}"),
+                    effective_weight_array=getattr(
+                        self.interval,
+                        f"cooperative_weight_effective_{variable_id}",
+                    ),
+                )
+            )
+        if len(self.cooperative_variables) == 0:
+            raise ValueError("cooperative potential must declare at least one variable")
+        if abs(nominal_weight_sum - 1.0) > 1e-9:
+            raise ValueError("cooperative variable weights must sum to 1.0")
+
+        self.configure_adaptive_weights(adaptive_weights_config)
+        self.configure_balance(balance_config)
+        self.configure_synchrony(synchrony_config)
+        self.configure_adaptive_residual(cooperative_config["adaptive_residual"])
+        self.configure_regime_residual(cooperative_config)
+
+    def configure_adaptive_weights(self, adaptive_weights_config):
+        self.adaptive_weights_enabled = bool(adaptive_weights_config["enabled"])
+        self.weight_floor = float(adaptive_weights_config["weight_floor"])
+        self.deterioration_weight = float(adaptive_weights_config["deterioration_weight"])
+        self.smoothing_alpha = float(adaptive_weights_config["smoothing_alpha"])
+        if not np.isfinite(self.weight_floor):
+            raise ValueError("adaptive_weights weight_floor must be finite")
+        if not np.isfinite(self.deterioration_weight):
+            raise ValueError("adaptive_weights deterioration_weight must be finite")
+        if not np.isfinite(self.smoothing_alpha):
+            raise ValueError("adaptive_weights smoothing_alpha must be finite")
+        if self.weight_floor < 0.0 or self.weight_floor > 1.0 / len(self.cooperative_variables):
+            raise ValueError("adaptive_weights weight_floor must be between 0 and 1/N")
+        if self.deterioration_weight < 0.0:
+            raise ValueError("adaptive_weights deterioration_weight must be non-negative")
+        if self.smoothing_alpha < 0.0 or self.smoothing_alpha > 1.0:
+            raise ValueError("adaptive_weights smoothing_alpha must be between 0 and 1")
+
+    def configure_balance(self, balance_config):
+        self.balance_enabled = bool(balance_config["enabled"])
+        self.balance_strength = float(balance_config["strength"])
+
+    def configure_synchrony(self, synchrony_config):
+        self.synchrony_enabled = bool(synchrony_config["enabled"])
+        self.synchrony_source_array = getattr(self.interval, synchrony_config["source"])
+        self.synchrony_strength = float(synchrony_config["strength"])
+
+    def configure_adaptive_residual(self, adaptive_residual_config):
+        self.adaptive_residual_enabled = bool(adaptive_residual_config["enabled"])
+        self.adaptive_residual_source_array = getattr(self.interval, adaptive_residual_config["source"])
+        self.residual_weight_min = float(adaptive_residual_config["residual_weight_min"])
+        self.residual_weight_max = float(adaptive_residual_config["residual_weight_max"])
+        self.residual_weight_gamma = float(adaptive_residual_config["gamma"])
+        if not np.isfinite(self.residual_weight_min):
+            raise ValueError("adaptive_residual residual_weight_min must be finite")
+        if not np.isfinite(self.residual_weight_max):
+            raise ValueError("adaptive_residual residual_weight_max must be finite")
+        if not np.isfinite(self.residual_weight_gamma):
+            raise ValueError("adaptive_residual gamma must be finite")
+        if self.residual_weight_min < 0.0 or self.residual_weight_max < 0.0:
+            raise ValueError("adaptive_residual residual weights must be non-negative")
+        if self.residual_weight_max < self.residual_weight_min:
+            raise ValueError("adaptive_residual residual_weight_max must be greater than or equal to min")
+        if self.residual_weight_gamma < 1.0:
+            raise ValueError("adaptive_residual gamma must be greater than or equal to 1")
+
+    def configure_regime_residual(self, cooperative_config):
+        self.regime_thresholds = ()
+        self.reward_mode_by_regime = ()
+        self.residual_weight_by_regime = ()
+        self.regime_array = None
+        if self.cooperative_reward_mode != "regime_residual":
+            return
+
+        regime_config = cooperative_config["regime_residual_params"]
+        self.regime_array = getattr(self.interval, regime_config["signal"])
+        self.regime_thresholds = tuple(float(value) for value in regime_config["thresholds"])
+        previous_threshold = 0.0
+        for threshold in self.regime_thresholds:
+            if not np.isfinite(threshold):
+                raise ValueError("regime_residual thresholds must be finite")
+            if threshold <= previous_threshold:
+                raise ValueError("regime_residual thresholds must be strictly increasing")
+            if threshold >= 1.0:
+                raise ValueError("regime_residual thresholds must be lower than 1")
+            previous_threshold = threshold
+        n_regimes = len(self.regime_thresholds) + 1
+
+        configured_reward_modes = regime_config["reward_mode_by_regime"]
+        reward_modes = []
+        for regime_idx in range(n_regimes):
+            reward_mode = configured_reward_modes[str(regime_idx)]
+            if reward_mode not in SUPPORTED_REGIME_REWARD_MODES:
+                raise ValueError(f"Unsupported regime reward mode: {reward_mode}")
+            reward_modes.append(reward_mode)
+        if len(configured_reward_modes) != n_regimes:
+            raise ValueError("regime_residual reward_mode_by_regime must match the number of regimes")
+        self.reward_mode_by_regime = tuple(reward_modes)
+
+        configured_residual_weights = regime_config["residual_weight_by_regime"]
+        residual_weights = []
+        for regime_idx in range(n_regimes):
+            weight = float(configured_residual_weights[str(regime_idx)])
+            if not np.isfinite(weight):
+                raise ValueError("regime_residual residual weights must be finite")
+            if weight < 0.0:
+                raise ValueError("regime_residual residual weights must be non-negative")
+            residual_weights.append(weight)
+        if len(configured_residual_weights) != n_regimes:
+            raise ValueError("regime_residual residual_weight_by_regime must match the number of regimes")
+        self.residual_weight_by_regime = tuple(residual_weights)
+
+    def configure_composition(self, composition_config):
+        weights = composition_config["weights"]
+        self.local_weight = float(weights["local"])
+        self.cooperative_weight = float(weights["cooperative"])
+        self.strategic_weight = float(weights["strategic"])
+        composition_weights = (self.local_weight, self.cooperative_weight, self.strategic_weight)
+        if not all(np.isfinite(weight) for weight in composition_weights):
+            raise ValueError("reward composition weights must be finite")
+        if any(weight < 0.0 for weight in composition_weights):
+            raise ValueError("reward composition weights must be non-negative")
+        if abs(sum(composition_weights) - 1.0) > 1e-9:
+            raise ValueError("reward composition weights must sum to 1.0")
+        if not self.cooperative_enabled and self.cooperative_weight != 0.0:
+            raise ValueError("cooperative reward disabled with non-zero cooperative composition weight")
+
+    def build_agent_tracks(self, agent_config):
         self.agent_tracks = []
         for gain_agent_config in agent_config["gain_agents"]:
             agent_id = gain_agent_config["id"]
@@ -165,6 +649,7 @@ class RewardCalculator:
                 )
             )
 
+    def configure_assignment(self):
         if self.assignment == "controller_reward":
             self.assign_rewards = self.assign_controller_rewards
         elif self.assignment == "global_reward":
@@ -174,32 +659,29 @@ class RewardCalculator:
         else:
             raise ValueError(f"Unsupported reward assignment: {self.assignment}")
 
-        self.strategic_reward_signed = 0.0
-        self.previous_cooperative_potential = 0.0
-        self.has_previous_cooperative_potential = False
-
-        self.terminal_bonus_config = reward_config["terminal_learning_bonus"]
-        self.terminal_bonus_enabled = bool(self.terminal_bonus_config["enabled"])
-        self.terminal_bonus_by_reason = self.terminal_bonus_config["bonuses"]
-        self.reason_codes = termination_config["reason_codes"]
-        self.reason_name_by_code = {}
-        for reason_name, reason_code in self.reason_codes.items():
-            self.reason_name_by_code[int(reason_code)] = reason_name
-        self.terminal_bonus = 0
-
     def reset_episode(self):
         self.strategic_reward_signed = 0.0
-        self.terminal_bonus = 0.0
         self.previous_cooperative_potential = 0.0
         self.has_previous_cooperative_potential = False
+        self.previous_monotonic_utility = 0.0
+        self.has_previous_monotonic_utility = False
+        self.has_previous_variable_healths = False
+        self.has_previous_relational_healths = False
+        for variable_track in self.cooperative_variables:
+            self.previous_variable_costs[variable_track.variable_id] = 0.0
+            self.previous_variable_needs[variable_track.variable_id] = 0.0
+            self.previous_variable_healths[variable_track.variable_id] = 0.0
+        for variable_track in self.relational_variables:
+            self.previous_relational_healths[variable_track.variable_id] = 0.0
 
     def evaluate_interval(self, interval_idx):
-        self.terminal_learning_bonus(interval_idx)
         self.compute_local_rewards(interval_idx)
+        self.compute_relational_signals(interval_idx)
         self.compute_cooperative_reward(interval_idx)
         self.compute_strategic_reward(interval_idx)
         self.compose_controller_rewards(interval_idx)
         self.compose_global_reward(interval_idx)
+        self.compute_terminal_learning_bonus(interval_idx)
         self.assign_rewards(interval_idx)
 
     def compute_local_rewards(self, interval_idx):
@@ -208,57 +690,524 @@ class RewardCalculator:
             for component in local_track.components:
                 local_cost += component.weight * component.cost_array[interval_idx]
             local_cost = _clip_01(float(local_cost))
-            local_track.local_cost_array[interval_idx] = local_cost
-            local_track.local_reward_array[interval_idx] = _reward_from_cost(local_cost)
+            local_track.cost_array[interval_idx] = local_cost
+            local_track.health_array[interval_idx] = 1.0 - local_cost
+            local_track.reward_array[interval_idx] = _reward_from_cost(local_cost)
 
     def compute_cooperative_reward(self, interval_idx):
-        if self.cooperative_enabled:
-            cooperative_potential = self.compute_cooperative_potential(interval_idx)
-            cooperative_cost = _clip_01(1.0 - cooperative_potential)
-            delta_cooperative_potential = self.compute_delta_cooperative_potential(cooperative_potential)
-            cooperative_reward = self.transform_cooperative_reward(
-                cooperative_potential,
-                delta_cooperative_potential,
+        if not self.cooperative_enabled:
+            self.interval.cooperative_reward_signed[interval_idx] = 0.0
+            self.interval.cooperative_reward_differential_signed[interval_idx] = 0.0
+            return
+        if self.cooperative_type == "factorial_cooperative":
+            self.compute_factorial_cooperative_reward(interval_idx)
+        elif self.cooperative_type == "intensity_compensability_cooperative":
+            self.compute_intensity_compensability_reward(interval_idx)
+        elif self.cooperative_type == "potential_cooperative":
+            self.compute_potential_cooperative_reward(interval_idx)
+        elif self.cooperative_type == "monotonic_cooperative":
+            self.compute_monotonic_cooperative_reward(interval_idx)
+
+    def compute_relational_signals(self, interval_idx):
+        first_track = self.relational_variables[0]
+        second_track = self.relational_variables[1]
+        first_health = _clip_01(float(first_track.health_array[interval_idx]))
+        second_health = _clip_01(float(second_track.health_array[interval_idx]))
+        mean_health = 0.5 * (first_health + second_health)
+        health_gap = first_health - second_health
+
+        if self.has_previous_relational_healths:
+            first_delta = first_health - self.previous_relational_healths[first_track.variable_id]
+            second_delta = second_health - self.previous_relational_healths[second_track.variable_id]
+            delta_gap = first_delta - second_delta
+            common_progress = 0.5 * (first_delta + second_delta)
+        else:
+            first_delta = 0.0
+            second_delta = 0.0
+            delta_gap = 0.0
+            common_progress = 0.0
+            self.has_previous_relational_healths = True
+
+        self.previous_relational_healths[first_track.variable_id] = first_health
+        self.previous_relational_healths[second_track.variable_id] = second_health
+
+        self.interval.mean_health_01[interval_idx] = mean_health
+        self.interval.health_gap_signed[interval_idx] = health_gap
+        self.interval.delta_health_gap_signed[interval_idx] = delta_gap
+        self.interval.absolute_common_utility_signed[interval_idx] = 2.0 * mean_health - 1.0
+        self.interval.balance_utility_signed[interval_idx] = -(health_gap**2)
+        self.interval.synchrony_utility_signed[interval_idx] = -((delta_gap / 2.0) ** 2)
+        self.interval.common_progress_signed[interval_idx] = common_progress
+
+        for variable_track, health_delta, differential_sign in (
+            (first_track, first_delta, 1.0),
+            (second_track, second_delta, -1.0),
+        ):
+            variable_id = variable_track.variable_id
+            getattr(self.interval, f"delta_health_{variable_id}_signed")[interval_idx] = health_delta
+            getattr(self.interval, f"health_delta_signed_{variable_id}")[interval_idx] = health_delta
+            getattr(self.interval, f"differential_utility_signed_{variable_id}")[
+                interval_idx
+            ] = differential_sign * health_gap
+
+    def compute_factorial_cooperative_reward(self, interval_idx):
+        absolute_utility = float(self.interval.absolute_common_utility_signed[interval_idx])
+        balance_utility = float(self.interval.balance_utility_signed[interval_idx])
+        synchrony_utility = float(self.interval.synchrony_utility_signed[interval_idx])
+        differential_utility = float(self.interval.health_gap_signed[interval_idx])
+        common_progress = float(self.interval.common_progress_signed[interval_idx])
+
+        absolute_normalized = _normalize_signed_utility(
+            absolute_utility,
+            self.factorial_absolute_normalization_enabled,
+            self.factorial_absolute_normalization_value,
+        )
+        balance_normalized = _normalize_signed_utility(
+            balance_utility,
+            self.factorial_balance_normalization_enabled,
+            self.factorial_balance_normalization_value,
+        )
+        synchrony_normalized = _normalize_signed_utility(
+            synchrony_utility,
+            self.factorial_synchrony_normalization_enabled,
+            self.factorial_synchrony_normalization_value,
+        )
+        differential_normalized = _normalize_signed_utility(
+            differential_utility,
+            self.factorial_differential_normalization_enabled,
+            self.factorial_differential_normalization_value,
+        )
+
+        absolute_contribution = self.factorial_absolute_weight * absolute_normalized
+        balance_contribution = (
+            self.factorial_balance_weight * balance_normalized
+            if self.factorial_balance_enabled
+            else 0.0
+        )
+        synchrony_contribution = (
+            self.factorial_synchrony_weight * synchrony_normalized
+            if self.factorial_synchrony_enabled
+            else 0.0
+        )
+        differential_contribution = (
+            self.factorial_differential_weight * differential_normalized
+            if self.factorial_differential_enabled
+            else 0.0
+        )
+        common_progress_contribution = (
+            self.factorial_common_progress_weight * common_progress
+            if self.factorial_composition_mode == "common_progress"
+            else 0.0
+        )
+        cooperative_common = (
+            absolute_contribution
+            + balance_contribution
+            + synchrony_contribution
+            + common_progress_contribution
+        )
+
+        self.interval.absolute_common_utility_normalized_signed[
+            interval_idx
+        ] = absolute_normalized
+        self.interval.balance_utility_normalized_signed[interval_idx] = balance_normalized
+        self.interval.synchrony_utility_normalized_signed[interval_idx] = synchrony_normalized
+        for variable_track, differential_sign in (
+            (self.relational_variables[0], 1.0),
+            (self.relational_variables[1], -1.0),
+        ):
+            getattr(
+                self.interval,
+                f"differential_utility_normalized_signed_{variable_track.variable_id}",
+            )[interval_idx] = differential_sign * differential_normalized
+
+        self.interval.factorial_absolute_contribution_signed[interval_idx] = absolute_contribution
+        self.interval.factorial_balance_contribution_signed[interval_idx] = balance_contribution
+        self.interval.factorial_synchrony_contribution_signed[interval_idx] = synchrony_contribution
+        self.interval.factorial_differential_contribution_signed[
+            interval_idx
+        ] = differential_contribution
+        self.interval.factorial_common_progress_contribution_signed[
+            interval_idx
+        ] = common_progress_contribution
+        self.interval.cooperative_reward_signed[interval_idx] = cooperative_common
+        self.interval.cooperative_reward_differential_signed[
+            interval_idx
+        ] = differential_contribution
+
+    def compute_intensity_compensability_reward(self, interval_idx):
+        weighted_power_sum = 0.0
+        if self.compensability_order == 1.0:
+            generalized_welfare = 1.0
+            for variable_track in self.relational_variables:
+                health = _clip_01(float(variable_track.health_array[interval_idx]))
+                weight = self.intensity_weights[variable_track.variable_id]
+                generalized_welfare *= health**weight
+        else:
+            power = 1.0 - self.compensability_order
+            for variable_track in self.relational_variables:
+                health = _clip_01(float(variable_track.health_array[interval_idx]))
+                if power < 0.0:
+                    health = max(self.health_epsilon, health)
+                weight = self.intensity_weights[variable_track.variable_id]
+                weighted_power_sum += weight * (health**power)
+            generalized_welfare = weighted_power_sum ** (1.0 / power)
+        generalized_welfare = _clip_01(float(generalized_welfare))
+        mean_health = float(self.interval.mean_health_01[interval_idx])
+        # The legacy output name is retained for compatibility. For eta < 0 this
+        # quantity is a signed compensability contrast and is expected to be negative.
+        compensability_contrast = 2.0 * (mean_health - generalized_welfare)
+        cooperative_common = 2.0 * generalized_welfare - 1.0
+
+        self.interval.generalized_welfare_01[interval_idx] = generalized_welfare
+        self.interval.collective_noncompensability_loss_01[
+            interval_idx
+        ] = compensability_contrast
+        self.interval.collective_noncompensability_weighted_loss_01[
+            interval_idx
+        ] = self.cooperative_weight * compensability_contrast
+        self.interval.cooperative_reward_signed[interval_idx] = cooperative_common
+        self.interval.cooperative_reward_differential_signed[interval_idx] = 0.0
+
+    def compute_monotonic_cooperative_reward(self, interval_idx):
+        weighted_mean_health = 0.0
+        minimum_health = 1.0
+        maximum_health = 0.0
+        for variable_track in self.monotonic_variables:
+            health = 1.0 - _clip_01(float(variable_track.cost_array[interval_idx]))
+            weighted_mean_health += variable_track.weight * health
+            minimum_health = min(minimum_health, health)
+            maximum_health = max(maximum_health, health)
+
+        health_gap = maximum_health - minimum_health
+        monotonic_utility = _clip_01(
+            (1.0 - self.monotonic_minimum_health_weight) * weighted_mean_health
+            + self.monotonic_minimum_health_weight * minimum_health
+        )
+
+        if self.has_previous_monotonic_utility:
+            potential_shaping = _clip_signed(
+                self.discount_factor * monotonic_utility
+                - self.previous_monotonic_utility
             )
         else:
+            potential_shaping = 0.0
+            self.has_previous_monotonic_utility = True
+        self.previous_monotonic_utility = monotonic_utility
+
+        penalty_activation = 0.0
+        penalty_cost = 0.0
+        if self.post_compose_penalty_enabled:
+            penalty_activation = _clip_01(
+                (monotonic_utility - self.post_compose_penalty_activation_value)
+                / (1.0 - self.post_compose_penalty_activation_value)
+            )
+            for penalty_track in self.post_compose_penalty_tracks:
+                contribution = penalty_track.weight * _clip_01(
+                    float(penalty_track.cost_array[interval_idx])
+                )
+                penalty_track.contribution_array[interval_idx] = contribution
+                penalty_cost += contribution
+        else:
+            for penalty_track in self.post_compose_penalty_tracks:
+                penalty_track.contribution_array[interval_idx] = 0.0
+
+        penalty_cost = _clip_01(float(penalty_cost))
+        post_compose_penalty = _clip_01(penalty_activation * penalty_cost)
+        utility_post_penalty = _clip_01(monotonic_utility - post_compose_penalty)
+        base_reward = _clip_signed(2.0 * monotonic_utility - 1.0)
+        post_penalty_reward = _clip_signed(2.0 * utility_post_penalty - 1.0)
+
+        if self.monotonic_reward_mode == "absolute":
+            cooperative_reward = post_penalty_reward
+        else:
+            cooperative_reward = _clip_signed(
+                (
+                    post_penalty_reward
+                    + self.monotonic_potential_weight * potential_shaping
+                )
+                / (1.0 + self.monotonic_potential_weight)
+            )
+
+        self.interval.monotonic_weighted_mean_health_01[
+            interval_idx
+        ] = weighted_mean_health
+        self.interval.monotonic_minimum_health_01[interval_idx] = minimum_health
+        self.interval.monotonic_health_gap_01[interval_idx] = health_gap
+        self.interval.monotonic_utility_01[interval_idx] = monotonic_utility
+        self.interval.monotonic_utility_post_penalty_01[
+            interval_idx
+        ] = utility_post_penalty
+        self.interval.monotonic_potential_shaping_signed[
+            interval_idx
+        ] = potential_shaping
+        self.interval.monotonic_base_reward_signed[interval_idx] = base_reward
+        self.interval.monotonic_post_penalty_reward_signed[
+            interval_idx
+        ] = post_penalty_reward
+        self.interval.monotonic_post_compose_penalty_activation_01[
+            interval_idx
+        ] = penalty_activation
+        self.interval.monotonic_post_compose_penalty_cost_01[
+            interval_idx
+        ] = penalty_cost
+        self.interval.monotonic_post_compose_penalty_01[
+            interval_idx
+        ] = post_compose_penalty
+        self.interval.cooperative_reward_signed[interval_idx] = cooperative_reward
+        self.interval.cooperative_reward_differential_signed[interval_idx] = 0.0
+
+    def compute_potential_cooperative_reward(self, interval_idx):
+        effective_weights = self.compute_effective_cooperative_weights()
+        self.write_effective_cooperative_weights(interval_idx, effective_weights)
+        if self.cooperative_enabled:
+            (
+                cooperative_potential_base,
+                cooperative_positive_progress,
+                cooperative_deterioration,
+                cooperative_progress_signed,
+            ) = self.compute_cooperative_potential_base(interval_idx, effective_weights)
+            (
+                health_balance,
+                balance_factor,
+                synchrony_factor,
+                cooperative_potential,
+            ) = self.compute_collective_potential(
+                interval_idx,
+                cooperative_potential_base,
+                effective_weights,
+            )
+            cooperative_cost = _clip_01(1.0 - cooperative_potential)
+            delta_cooperative_potential = self.compute_delta_cooperative_potential(cooperative_potential)
+            cooperative_regime = self.compute_cooperative_regime(cooperative_potential)
+        else:
+            cooperative_potential_base = 1.0
+            cooperative_positive_progress = 0.0
+            cooperative_deterioration = 0.0
+            cooperative_progress_signed = 0.0
+            health_balance = 1.0
+            balance_factor = 1.0
+            synchrony_factor = 1.0
             cooperative_potential = 1.0
             cooperative_cost = 0.0
             delta_cooperative_potential = 0.0
-            cooperative_reward = 0.0
-        self.interval.cooperative_cost_01[interval_idx] = cooperative_cost
+            cooperative_regime = self.compute_cooperative_regime(cooperative_potential)
+
+        self.interval.collective_potential_01[interval_idx] = cooperative_potential
         self.interval.cooperative_potential_01[interval_idx] = cooperative_potential
+        residual_weight_effective = self.compute_residual_weight_effective(
+            interval_idx,
+            cooperative_regime,
+        )
+        if self.cooperative_enabled:
+            cooperative_progress_residual = self.compute_cooperative_progress_residual(
+                cooperative_potential,
+                delta_cooperative_potential,
+                residual_weight_effective,
+            )
+            cooperative_reward = self.transform_cooperative_reward(
+                cooperative_potential,
+                delta_cooperative_potential,
+                cooperative_regime,
+                residual_weight_effective,
+            )
+        else:
+            cooperative_progress_residual = 0.0
+            cooperative_reward = 0.0
+
+        self.interval.cooperative_cost_01[interval_idx] = cooperative_cost
+        self.interval.cooperative_positive_progress_01[interval_idx] = cooperative_positive_progress
+        self.interval.cooperative_deterioration_01[interval_idx] = cooperative_deterioration
+        self.interval.cooperative_progress_signed[interval_idx] = cooperative_progress_signed
+        self.interval.cooperative_potential_base_01[interval_idx] = cooperative_potential_base
+        self.interval.health_balance_01[interval_idx] = health_balance
+        self.interval.balance_factor_01[interval_idx] = balance_factor
+        self.interval.synchrony_factor_01[interval_idx] = synchrony_factor
         self.interval.delta_cooperative_potential_signed[interval_idx] = delta_cooperative_potential
+        self.interval.cooperative_progress_residual_signed[interval_idx] = cooperative_progress_residual
+        self.interval.residual_weight_effective[interval_idx] = residual_weight_effective
         self.interval.cooperative_reward_signed[interval_idx] = cooperative_reward
+        self.interval.cooperative_reward_differential_signed[interval_idx] = 0.0
+        if self.cooperative_reward_mode == "regime_residual":
+            self.regime_array[interval_idx] = cooperative_regime
+        self.update_cooperative_variable_needs(interval_idx)
 
     def compute_cooperative_cost(self, interval_idx):
         cooperative_potential = self.compute_cooperative_potential(interval_idx)
         return _clip_01(1.0 - cooperative_potential)
 
     def compute_cooperative_potential(self, interval_idx):
+        effective_weights = self.compute_effective_cooperative_weights()
+        cooperative_potential_base = self.compute_cooperative_potential_base(interval_idx, effective_weights)[0]
+        return self.compute_collective_potential(interval_idx, cooperative_potential_base, effective_weights)[3]
+
+    def compute_cooperative_potential_base(self, interval_idx, effective_weights):
         if self.cooperative_mode == "norm-p":
-            cooperative_cost = self.compute_norm_p_cooperative_cost(interval_idx)
-            return _clip_01(1.0 - cooperative_cost)
+            cooperative_cost = self.compute_norm_p_cooperative_cost(interval_idx, effective_weights)
+            return _clip_01(1.0 - cooperative_cost), 0.0, 0.0, 0.0
         if self.cooperative_mode == "geometric_consensus":
-            return self.compute_geometric_consensus_potential(interval_idx)
+            cooperative_potential = self.compute_geometric_consensus_potential(interval_idx, effective_weights)
+            return cooperative_potential, 0.0, 0.0, 0.0
+        if self.cooperative_mode == "concurrent_progress":
+            return self.compute_concurrent_progress_potential(interval_idx, effective_weights)
         raise ValueError(f"Unsupported cooperative potential mode: {self.cooperative_mode}")
 
-    def compute_norm_p_cooperative_cost(self, interval_idx):
+    def compute_norm_p_cooperative_cost(self, interval_idx, effective_weights):
         cooperative_cost_power = 0.0
-        for local_track in self.local_tracks:
-            local_cost = _clip_01(float(local_track.local_cost_array[interval_idx]))
-            cooperative_cost_power += (
-                float(self.cooperative_weights[local_track.controller_id])
-                * (local_cost ** self.cooperative_p)
+        for variable_track in self.cooperative_variables:
+            variable_cost = _clip_01(float(variable_track.potential_source_array[interval_idx]))
+            cooperative_cost_power += effective_weights[variable_track.variable_id] * (
+                variable_cost ** self.cooperative_p
             )
         return float(cooperative_cost_power ** (1.0 / self.cooperative_p))
 
-    def compute_geometric_consensus_potential(self, interval_idx):
+    def compute_geometric_consensus_potential(self, interval_idx, effective_weights):
         log_potential = 0.0
-        for local_track in self.local_tracks:
-            local_cost = _clip_01(float(local_track.local_cost_array[interval_idx]))
-            local_remaining = max(self.epsilon_geom_conc, 1.0 - local_cost)
-            log_potential += float(self.cooperative_weights[local_track.controller_id]) * np.log(local_remaining)
+        for variable_track in self.cooperative_variables:
+            variable_health = max(
+                self.epsilon_geom_conc,
+                _clip_01(float(variable_track.potential_source_array[interval_idx])),
+            )
+            log_potential += effective_weights[variable_track.variable_id] * np.log(variable_health)
         return _clip_01(float(np.exp(log_potential)))
+
+    def compute_concurrent_progress_potential(self, interval_idx, effective_weights):
+        current_healths = {}
+        for variable_track in self.cooperative_variables:
+            variable_id = variable_track.variable_id
+            current_healths[variable_id] = _clip_01(
+                float(variable_track.potential_source_array[interval_idx])
+            )
+
+        if not self.has_previous_variable_healths:
+            for variable_track in self.cooperative_variables:
+                variable_id = variable_track.variable_id
+                getattr(self.interval, f"health_delta_signed_{variable_id}")[interval_idx] = 0.0
+                self.previous_variable_healths[variable_id] = current_healths[variable_id]
+            self.has_previous_variable_healths = True
+            return 0.5, 0.0, 0.0, 0.0
+
+        positive_progress = 1.0
+        all_variables_improve = True
+        deterioration_power = 0.0
+        for variable_track in self.cooperative_variables:
+            variable_id = variable_track.variable_id
+            health_delta = current_healths[variable_id] - self.previous_variable_healths[variable_id]
+            getattr(self.interval, f"health_delta_signed_{variable_id}")[interval_idx] = health_delta
+
+            variable_progress = max(health_delta, 0.0)
+            variable_deterioration = max(-health_delta, 0.0)
+            if variable_progress == 0.0:
+                all_variables_improve = False
+            variable_weight = effective_weights[variable_id]
+            positive_progress *= variable_progress ** variable_weight
+            deterioration_power += variable_weight * (
+                variable_deterioration ** self.deterioration_order
+            )
+            self.previous_variable_healths[variable_id] = current_healths[variable_id]
+
+        if not all_variables_improve:
+            positive_progress = 0.0
+        cooperative_deterioration = deterioration_power ** (1.0 / self.deterioration_order)
+        cooperative_progress = positive_progress - cooperative_deterioration
+        cooperative_potential = 0.5 * (cooperative_progress + 1.0)
+        return (
+            _clip_01(float(cooperative_potential)),
+            _clip_01(float(positive_progress)),
+            _clip_01(float(cooperative_deterioration)),
+            _clip_signed(float(cooperative_progress)),
+        )
+
+    def compute_collective_potential(self, interval_idx, cooperative_potential_base, effective_weights):
+        health_balance, balance_factor = self.compute_health_balance(interval_idx, effective_weights)
+        synchrony_factor = self.compute_synchrony_factor(interval_idx)
+        collective_potential = _clip_01(
+            float(cooperative_potential_base * balance_factor * synchrony_factor)
+        )
+        return health_balance, balance_factor, synchrony_factor, collective_potential
+
+    def compute_health_balance(self, interval_idx, effective_weights):
+        if not self.balance_enabled:
+            return 1.0, 1.0
+
+        geometric_health = 1.0
+        arithmetic_health = 0.0
+        for variable_track in self.cooperative_variables:
+            variable_health = _clip_01(float(variable_track.balance_health_array[interval_idx]))
+            variable_weight = effective_weights[variable_track.variable_id]
+            geometric_health *= variable_health ** variable_weight
+            arithmetic_health += variable_weight * variable_health
+
+        if arithmetic_health == 0.0:
+            health_balance = 1.0
+        else:
+            health_balance = _clip_01(float(geometric_health / arithmetic_health))
+        if self.balance_strength == 0.0:
+            balance_factor = 1.0
+        else:
+            balance_factor = _clip_01(float(health_balance ** self.balance_strength))
+        return health_balance, balance_factor
+
+    def compute_synchrony_factor(self, interval_idx):
+        if not self.synchrony_enabled:
+            return 1.0
+        if self.synchrony_strength == 0.0:
+            return 1.0
+        synchrony = _clip_01(float(self.synchrony_source_array[interval_idx]))
+        return _clip_01(float(synchrony ** self.synchrony_strength))
+
+    def compute_effective_cooperative_weights(self):
+        if not self.adaptive_weights_enabled:
+            return {
+                variable_track.variable_id: variable_track.nominal_weight
+                for variable_track in self.cooperative_variables
+            }
+
+        total_need = 0.0
+        for variable_track in self.cooperative_variables:
+            total_need += float(self.previous_variable_needs[variable_track.variable_id])
+
+        n_variables = len(self.cooperative_variables)
+        effective_weights = {}
+        if total_need <= 0.0:
+            uniform_weight = 1.0 / n_variables
+            for variable_track in self.cooperative_variables:
+                effective_weights[variable_track.variable_id] = uniform_weight
+            return effective_weights
+
+        adaptive_span = 1.0 - n_variables * self.weight_floor
+        for variable_track in self.cooperative_variables:
+            variable_need = float(self.previous_variable_needs[variable_track.variable_id])
+            effective_weights[variable_track.variable_id] = (
+                self.weight_floor + adaptive_span * variable_need / total_need
+            )
+        return effective_weights
+
+    def write_effective_cooperative_weights(self, interval_idx, effective_weights):
+        for variable_track in self.cooperative_variables:
+            variable_track.effective_weight_array[interval_idx] = effective_weights[variable_track.variable_id]
+
+    def update_cooperative_variable_needs(self, interval_idx):
+        deterioration_weight = 0.0
+        smoothing_alpha = 0.0
+        if self.adaptive_weights_enabled:
+            deterioration_weight = self.deterioration_weight
+            smoothing_alpha = self.smoothing_alpha
+
+        for variable_track in self.cooperative_variables:
+            variable_id = variable_track.variable_id
+            variable_cost = _clip_01(float(variable_track.need_cost_array[interval_idx]))
+            previous_cost = _clip_01(float(self.previous_variable_costs[variable_id]))
+            deterioration = max(0.0, variable_cost - previous_cost)
+            variable_need = (variable_cost + deterioration_weight * deterioration) / (1.0 + deterioration_weight)
+            previous_need = _clip_01(float(self.previous_variable_needs[variable_id]))
+            if smoothing_alpha == 0.0:
+                smoothed_need = variable_need
+            else:
+                smoothed_need = (1.0 - smoothing_alpha) * previous_need + smoothing_alpha * variable_need
+            smoothed_need = _clip_01(float(smoothed_need))
+            variable_track.need_array[interval_idx] = smoothed_need
+            self.previous_variable_costs[variable_id] = variable_cost
+            self.previous_variable_needs[variable_id] = smoothed_need
 
     def compute_delta_cooperative_potential(self, cooperative_potential):
         if not self.has_previous_cooperative_potential:
@@ -268,14 +1217,90 @@ class RewardCalculator:
         self.previous_cooperative_potential = cooperative_potential
         return _clip_signed(float(delta_cooperative_potential))
 
-    def transform_cooperative_reward(self, cooperative_potential, delta_cooperative_potential):
-        if self.cooperative_reward_mode == "absolute":
+    def compute_cooperative_regime(self, cooperative_potential):
+        if self.cooperative_reward_mode != "regime_residual":
+            return 0
+        for regime_idx, threshold in enumerate(self.regime_thresholds):
+            if cooperative_potential < threshold:
+                return regime_idx
+        return len(self.regime_thresholds)
+
+    def compute_regime_residual_weight(self, cooperative_regime):
+        if self.cooperative_reward_mode == "regime_residual":
+            return self.residual_weight_by_regime[cooperative_regime]
+        return self.residual_weight
+
+    def compute_residual_weight_effective(self, interval_idx, cooperative_regime):
+        if self.adaptive_residual_enabled:
+            residual_source = _clip_01(float(self.adaptive_residual_source_array[interval_idx]))
+            return float(
+                self.residual_weight_min
+                + (self.residual_weight_max - self.residual_weight_min)
+                * (residual_source ** self.residual_weight_gamma)
+            )
+        return self.compute_regime_residual_weight(cooperative_regime)
+
+    def compute_cooperative_progress_residual(
+        self,
+        cooperative_potential,
+        delta_cooperative_potential,
+        residual_weight,
+    ):
+        cooperative_residual = 1.0 - cooperative_potential
+        return _clip_signed(delta_cooperative_potential - residual_weight * cooperative_residual)
+
+    def transform_basic_cooperative_reward(
+        self,
+        reward_mode,
+        cooperative_potential,
+        delta_cooperative_potential,
+        residual_weight,
+    ):
+        if reward_mode == "absolute":
             return _clip_signed(2.0 * cooperative_potential - 1.0)
-        if self.cooperative_reward_mode == "progress":
+        if reward_mode == "progress":
             return _clip_signed(delta_cooperative_potential)
-        if self.cooperative_reward_mode == "progress_residual":
+        if reward_mode == "progress_residual":
             cooperative_residual = 1.0 - cooperative_potential
-            return _clip_signed(delta_cooperative_potential - self.residual_weight * cooperative_residual)
+            return _clip_signed(delta_cooperative_potential - residual_weight * cooperative_residual)
+        raise ValueError(f"Unsupported cooperative reward mode: {reward_mode}")
+
+    def transform_cooperative_reward(
+        self,
+        cooperative_potential,
+        delta_cooperative_potential,
+        cooperative_regime,
+        residual_weight_effective,
+    ):
+        if self.cooperative_reward_mode == "absolute":
+            return self.transform_basic_cooperative_reward(
+                self.cooperative_reward_mode,
+                cooperative_potential,
+                delta_cooperative_potential,
+                self.residual_weight,
+            )
+        if self.cooperative_reward_mode == "progress":
+            return self.transform_basic_cooperative_reward(
+                self.cooperative_reward_mode,
+                cooperative_potential,
+                delta_cooperative_potential,
+                self.residual_weight,
+            )
+        if self.cooperative_reward_mode == "progress_residual":
+            return self.transform_basic_cooperative_reward(
+                self.cooperative_reward_mode,
+                cooperative_potential,
+                delta_cooperative_potential,
+                residual_weight_effective,
+            )
+        if self.cooperative_reward_mode == "regime_residual":
+            regime_reward_mode = self.reward_mode_by_regime[cooperative_regime]
+            return self.transform_basic_cooperative_reward(
+                regime_reward_mode,
+                cooperative_potential,
+                delta_cooperative_potential,
+                residual_weight_effective,
+            )
         raise ValueError(f"Unsupported cooperative reward mode: {self.cooperative_reward_mode}")
 
     def compute_strategic_reward(self, interval_idx):
@@ -285,51 +1310,122 @@ class RewardCalculator:
         self.strategic_reward_signed = 0.0
 
     def compose_controller_rewards(self, interval_idx):
-        cooperative_reward = self.interval.cooperative_reward_signed[interval_idx]
+        cooperative_common = float(self.interval.cooperative_reward_signed[interval_idx])
+        cooperative_differential = float(
+            self.interval.cooperative_reward_differential_signed[interval_idx]
+        )
+        cooperative_sign_by_id = {
+            self.relational_variables[0].variable_id: 1.0,
+            self.relational_variables[1].variable_id: -1.0,
+        }
         for local_track in self.local_tracks:
+            cooperative_reward = (
+                cooperative_common
+                + cooperative_sign_by_id[local_track.controller_id] * cooperative_differential
+            )
+            local_contribution = self.local_weight * float(local_track.reward_array[interval_idx])
+            cooperative_contribution = self.cooperative_weight * cooperative_reward
             controller_reward = (
-                self.local_weight * local_track.local_reward_array[interval_idx]
-                + self.cooperative_weight * cooperative_reward
+                local_contribution
+                + cooperative_contribution
                 + self.strategic_weight * self.strategic_reward_signed
             )
-            local_track.reward_controller_array[interval_idx] = _clip_signed(float(controller_reward))
+            if not np.isfinite(controller_reward):
+                raise ValueError("ordinary controller reward must be finite")
+            clip_excess = max(0.0, abs(controller_reward) - 1.0)
+            if clip_excess > 1.0e-12:
+                raise ValueError("ordinary controller reward exceeds [-1, 1] by construction")
+            getattr(self.interval, f"local_contribution_signed_{local_track.controller_id}")[
+                interval_idx
+            ] = local_contribution
+            getattr(self.interval, f"cooperative_reward_signed_{local_track.controller_id}")[
+                interval_idx
+            ] = cooperative_reward
+            getattr(
+                self.interval,
+                f"cooperative_contribution_signed_{local_track.controller_id}",
+            )[interval_idx] = cooperative_contribution
+            getattr(self.interval, f"reward_pre_clip_{local_track.controller_id}")[
+                interval_idx
+            ] = controller_reward
+            getattr(self.interval, f"reward_clip_excess_{local_track.controller_id}")[
+                interval_idx
+            ] = clip_excess
+            getattr(self.interval, f"reward_clipped_{local_track.controller_id}")[
+                interval_idx
+            ] = 0.0
+            local_track.controller_reward_array[interval_idx] = controller_reward
 
     def compose_global_reward(self, interval_idx):
         global_reward = 0.0
         for local_track in self.local_tracks:
-            global_reward += local_track.reward_controller_array[interval_idx]
-        global_reward /= len(self.local_tracks)
-        global_reward = _clip_signed(float(global_reward))
+            global_reward += local_track.controller_reward_array[interval_idx]
+        global_reward = float(global_reward / len(self.local_tracks))
+        if not np.isfinite(global_reward):
+            raise ValueError("ordinary global reward must be finite")
+        if abs(global_reward) > 1.0 + 1.0e-12:
+            raise ValueError("ordinary global reward exceeds [-1, 1] by construction")
         self.interval.reward_global_signed[interval_idx] = global_reward
         self.interval.global_interval_reward[interval_idx] = global_reward
 
     def assign_controller_rewards(self, interval_idx):
         for agent_track in self.agent_tracks:
             reward = self.find_controller_reward(agent_track.controller_id, interval_idx)
-            agent_track.reward_agent_array[interval_idx] = reward + self.terminal_bonus
-            agent_track.reward_for_learning_array[interval_idx] = reward + self.terminal_bonus
+            agent_track.reward_agent_array[interval_idx] = reward
+            normalized_reward = self.normalize_learning_reward(reward)
+            agent_track.reward_for_learning_array[interval_idx] = (
+                normalized_reward
+                + self.terminal_bonus_tracks[agent_track.controller_id].bonus_array[interval_idx]
+            )
 
     def find_controller_reward(self, controller_id, interval_idx):
         for local_track in self.local_tracks:
             if local_track.controller_id == controller_id:
-                return local_track.reward_controller_array[interval_idx]
+                return local_track.controller_reward_array[interval_idx]
         raise ValueError(f"Unknown controller for reward assignment: {controller_id}")
 
     def assign_global_reward(self, interval_idx):
         reward = self.interval.reward_global_signed[interval_idx]
         for agent_track in self.agent_tracks:
-            agent_track.reward_agent_array[interval_idx] = reward + self.terminal_bonus
-            agent_track.reward_for_learning_array[interval_idx] = reward + self.terminal_bonus
+            agent_track.reward_agent_array[interval_idx] = reward
+            normalized_reward = self.normalize_learning_reward(reward)
+            agent_track.reward_for_learning_array[interval_idx] = (
+                normalized_reward
+                + self.terminal_bonus_tracks[agent_track.controller_id].bonus_array[interval_idx]
+            )
+
+    def normalize_learning_reward(self, reward):
+        return _normalize_signed_utility(
+            float(reward),
+            self.learning_reward_normalization_enabled,
+            self.learning_reward_normalization_value,
+        )
 
     def assign_agent_reward(self, interval_idx):
         del interval_idx
         raise NotImplementedError("agent_reward assignment requires explicit fine credit implementation")
-    
-    def terminal_learning_bonus(self, interval_idx):
-        if not self.terminal_bonus_enabled:
-            return 0.0
 
+    def compute_terminal_learning_bonus(self, interval_idx):
         reason_code = int(self.interval.termination_reason_code[interval_idx])
         reason_name = self.reason_name_by_code[reason_code]
+        jointly_qualified = all(
+            bool(track.qualified_array[interval_idx])
+            for track in self.terminal_bonus_tracks.values()
+        )
+        bonus_sum = 0.0
+        for track in self.terminal_bonus_tracks.values():
+            eligible = bool(track.qualified_array[interval_idx])
+            if self.terminal_bonus_mode == "cooperative":
+                eligible = jointly_qualified
+            track.eligible_array[interval_idx] = float(eligible)
+            bonus = 0.0
+            if self.terminal_bonus_enabled and reason_name != "none":
+                if eligible:
+                    bonus = float(self.terminal_bonus_by_reason["stabilization_success"])
+                elif reason_name in ("time_limit", "limit_exceeded"):
+                    bonus = float(self.terminal_bonus_by_reason[reason_name])
+            track.bonus_array[interval_idx] = bonus
+            bonus_sum += bonus
 
-        self.terminal_bonus = float(self.terminal_bonus_by_reason[reason_name])
+        # Resumen entre lazos; cada agente recibe exclusivamente el valor de su lazo.
+        self.interval.terminal_bonus[interval_idx] = bonus_sum / len(self.terminal_bonus_tracks)

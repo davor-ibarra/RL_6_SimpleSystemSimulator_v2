@@ -3,18 +3,42 @@ data_summary:
     - episode_id
     - n_step
     - n_interval
-  
+
   derived_fields:
     - end_termination_reason
     - final_t_sec
-    - performance
-  
+    # - performance  # Cociente histórico basado en total_reward.
+
   end_episode_fields:
+    - terminal_inside_bands_final_pendulum_angle
+    - terminal_inside_bands_final_cart_position
+    - terminal_band_duration_sec_final_pendulum_angle
+    - terminal_band_duration_sec_final_cart_position
+    - terminal_band_qualified_final_pendulum_angle
+    - terminal_band_qualified_final_cart_position
+    - terminal_bonus_eligible_final_pendulum_angle
+    - terminal_bonus_eligible_final_cart_position
     - epsilon
     - learning_rate
-    - total_reward
-    - total_reward_pendulum_angle
-    - total_reward_cart_position
+    # - total_reward  # Retorno ordinario histórico; se conserva en metric_data.
+    # - total_reward_pendulum_angle
+    # - total_reward_cart_position
+    - total_learning_return
+    - total_learning_return_pendulum_angle
+    - total_learning_return_cart_position
+    - learning_return_rate
+    - terminal_bonus_separated_abs_return_fraction_kp_pendulum_angle
+    - terminal_bonus_discounted_abs_return_fraction_kp_pendulum_angle
+    - terminal_bonus_separated_abs_return_fraction_ki_pendulum_angle
+    - terminal_bonus_discounted_abs_return_fraction_ki_pendulum_angle
+    - terminal_bonus_separated_abs_return_fraction_kd_pendulum_angle
+    - terminal_bonus_discounted_abs_return_fraction_kd_pendulum_angle
+    - terminal_bonus_separated_abs_return_fraction_kp_cart_position
+    - terminal_bonus_discounted_abs_return_fraction_kp_cart_position
+    - terminal_bonus_separated_abs_return_fraction_ki_cart_position
+    - terminal_bonus_discounted_abs_return_fraction_ki_cart_position
+    - terminal_bonus_separated_abs_return_fraction_kd_cart_position
+    - terminal_bonus_discounted_abs_return_fraction_kd_cart_position
     - final_kp_cart_position
     - final_ki_cart_position
     - final_kd_cart_position
@@ -51,106 +75,140 @@ data_summary:
       stats: [mean, std, min, p25, p50, p75, max]
     - source: delta_u_total
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cart_force
-      stats: [mean, std, min, p25, p50, p75, max]
     - source: is_saturated_global
       stats: [mean, sum]
     - source: saturation_excess
       stats: [mean, std, min, p25, p50, p75, max]
     - source: saturation_proportion_global
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: error_pendulum_angle_raw
-      stats: [mean, std, min, p25, p50, p75, max]
     - source: error_pendulum_angle_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: derivative_error_pendulum_angle_raw
       stats: [mean, std, min, p25, p50, p75, max]
     - source: derivative_error_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: integral_error_pendulum_angle_raw
-      stats: [mean, std, min, p25, p50, p75, max]
     - source: integral_error_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_demand_pendulum_angle_raw
+    - source: p_term_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_demand_pendulum_angle_norm
+    - source: i_term_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_demand_pendulum_angle_raw
+    - source: d_term_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_demand_pendulum_angle_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_alloc_pendulum_angle_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_alloc_pendulum_angle_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_alloc_pendulum_angle_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_alloc_pendulum_angle_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_unallocated_pendulum_angle_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_unallocated_pendulum_angle_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: error_cart_position_raw
+    - source: delta_u_incremental_pendulum_angle_norm
       stats: [mean, std, min, p25, p50, p75, max]
     - source: error_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: derivative_error_cart_position_raw
-      stats: [mean, std, min, p25, p50, p75, max]
     - source: derivative_error_cart_position_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: integral_error_cart_position_raw
       stats: [mean, std, min, p25, p50, p75, max]
     - source: integral_error_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_demand_cart_position_raw
+    - source: p_term_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_demand_cart_position_norm
+    - source: i_term_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_demand_cart_position_raw
+    - source: d_term_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_demand_cart_position_norm
+    - source: delta_u_incremental_cart_position_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_alloc_cart_position_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_alloc_cart_position_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_alloc_cart_position_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: delta_u_alloc_cart_position_norm
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_unallocated_cart_position_raw
-      stats: [mean, std, min, p25, p50, p75, max]
-    - source: u_unallocated_cart_position_norm
-      stats: [mean, std, min, p25, p50, p75, max]
+
   interval_stats:
-    - source: u_total_rms_norm
+    - source: metric_error_pendulum_angle_mean_abs_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_u_total_01
-      stats: [mean, min, p25, p50, p75, max]
-    - source: delta_u_total_rms_norm
+    - source: cost_01_error_pendulum_angle_operating
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_delta_u_total_01
-      stats: [mean, min, p25, p50, p75, max]
-    - source: error_pendulum_angle_rms_norm
+    - source: metric_error_cart_position_mean_abs_norm
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_error_energy_01_pendulum_angle
-      stats: [mean, min, p25, p50, p75, max]
-    - source: delta_u_alloc_pendulum_angle_rms_norm
+    - source: cost_01_error_cart_position_operating
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_delta_u_01_pendulum_angle
-      stats: [mean, min, p25, p50, p75, max]
-    - source: error_cart_position_rms_norm
+    # Estas cuatro métricas se siguen calculando, pero no se persisten por intervalo.
+    # - source: raw_cost_error_pendulum_angle_rms
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_pendulum_angle_rms
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_error_cart_position_rms
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_cart_position_rms
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_delta_error_pendulum_angle
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_delta_error_pendulum_angle
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_delta_error_cart_position
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_delta_error_cart_position
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    - source: raw_cost_memory_pendulum_angle
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_error_energy_01_cart_position
-      stats: [mean, min, p25, p50, p75, max]
-    - source: delta_u_alloc_cart_position_rms_norm
+    - source: cost_01_memory_pendulum_angle
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: cost_delta_u_01_cart_position
+    - source: raw_cost_memory_cart_position
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: cost_01_memory_cart_position
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: raw_cost_derivative_error_pendulum_angle_rms
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: cost_01_derivative_error_pendulum_angle_rms
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: raw_cost_derivative_error_cart_position_rms
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: cost_01_derivative_error_cart_position_rms
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: raw_cost_u_total_abs
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: cost_01_u_total_abs
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: raw_cost_delta_u_total_abs
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: cost_01_delta_u_total_abs
+      stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_error_pendulum_angle_abs_median
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_pendulum_angle_abs_median_robust
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: raw_cost_error_cart_position_abs_median
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    # - source: cost_01_error_cart_position_abs_median_robust
+    #   stats: [mean, std, min, p25, p50, p75, max]
+    - source: local_cost_01_pendulum_angle
       stats: [mean, min, p25, p50, p75, max]
-    - source: local_reward_signed_pendulum_angle
+    - source: local_health_01_pendulum_angle
       stats: [mean, min, p25, p50, p75, max]
-    - source: local_reward_signed_cart_position
+    - source: local_need_01_pendulum_angle
+      stats: [mean, min, p25, p50, p75, max]
+    - source: cooperative_weight_effective_pendulum_angle
+      stats: [mean, min, p25, p50, p75, max]
+    - source: local_cost_01_cart_position
+      stats: [mean, min, p25, p50, p75, max]
+    - source: local_health_01_cart_position
+      stats: [mean, min, p25, p50, p75, max]
+    - source: local_need_01_cart_position
+      stats: [mean, min, p25, p50, p75, max]
+    - source: cooperative_weight_effective_cart_position
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_weighted_mean_health_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_minimum_health_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_health_gap_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_utility_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_utility_post_penalty_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_potential_shaping_signed
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: monotonic_base_reward_signed
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: monotonic_post_penalty_reward_signed
+      stats: [mean, std, min, p25, p50, p75, max]
+    - source: monotonic_post_compose_penalty_activation_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_post_compose_penalty_cost_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_post_compose_penalty_01
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_post_compose_penalty_contribution_01_control_effort
+      stats: [mean, min, p25, p50, p75, max]
+    - source: monotonic_post_compose_penalty_contribution_01_control_variation
       stats: [mean, min, p25, p50, p75, max]
     - source: cooperative_cost_01
       stats: [mean, min, p25, p50, p75, max]
@@ -160,9 +218,11 @@ data_summary:
       stats: [mean, min, p25, p50, p75, max]
     - source: delta_cooperative_potential_signed
       stats: [mean, std, min, p25, p50, p75, max]
-    - source: reward_controller_pendulum_angle
-      stats: [mean, sum, min, p25, p50, p75, max]
-    - source: reward_controller_cart_position
-      stats: [mean, sum, min, p25, p50, p75, max]
+    - source: cooperative_progress_residual_signed
+      stats: [mean, std, min, p25, p50, p75, max]
+    # - source: reward_controller_pendulum_angle
+    #   stats: [mean, sum, min, p25, p50, p75, max]
+    # - source: reward_controller_cart_position
+    #   stats: [mean, sum, min, p25, p50, p75, max]
     - source: reward_global_signed
       stats: [mean, std, min, p25, p50, p75, max]

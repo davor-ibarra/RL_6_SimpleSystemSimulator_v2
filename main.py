@@ -1,14 +1,16 @@
 import argparse
-import json
 import math
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 from agents.pid_qlearning_agent import PIDQLearningAgent
 from controllers.controller_manager import ControllerManager
 from dynamic_system.cart_pole_dynamic_system import CartPoleDynamicSystem
 from metrics.metric_collector import MetricCollector
 from metrics.metric_processing import MetricProcessor
+from metrics.metric_report import MetricReport
 from result_handler import ResultHandler
 from rewards.reward_calculator import RewardCalculator
 from runtime_arrays import build_runtime_arrays
@@ -17,13 +19,7 @@ from simulation_manager import SimulationManager
 
 def load_mapping_file(config_path):
     text = config_path.read_text(encoding="utf-8")
-    try:
-        import yaml
-
-        loaded_config = yaml.safe_load(text)
-    except ModuleNotFoundError:
-        loaded_config = json.loads(text)
-    return loaded_config
+    return yaml.safe_load(text)
 
 
 def load_config(config_path):
@@ -59,7 +55,7 @@ def build_capacities(config):
 def build_output_dir(config, run_id):
     output_root = Path(config["data"]["output_root"])
     output_dir = output_root / run_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=False)
     return output_dir
 
 
@@ -79,7 +75,7 @@ def main():
 
     config = load_config(args.config)
     apply_cli_overrides(config, args)
-    run_id = datetime.now().strftime("run_%Y%m%d_%H%M")
+    run_id = datetime.now().strftime("run_%Y%m%d_%H%M_%f")
     output_dir = build_output_dir(config, run_id)
 
     step_capacity, interval_capacity = build_capacities(config)
@@ -89,9 +85,41 @@ def main():
         config=config,
     )
 
-    result_handler = ResultHandler(output_dir, config["data"], config["termination"])
+    dynamic_system = CartPoleDynamicSystem(runtime, config["dynamic_system"])
+    controller_manager = ControllerManager(
+        runtime,
+        config["control"],
+        config["agent"],
+        config["simulation"]["dt_sec"],
+    )
+    agent = PIDQLearningAgent(
+        runtime,
+        config["agent"],
+        config["control"],
+        config["experiment"]["seed"],
+    )
+    metric_report = MetricReport(runtime, config, agent, run_id)
+    visualization_manager = None
+    if bool(config["visualization"]["enabled"]):
+        from visualization_manager import VisualizationManager
+
+        visualization_manager = VisualizationManager(
+            output_dir,
+            config["visualization"],
+            config,
+            runtime,
+        )
+    result_handler = ResultHandler(
+        output_dir,
+        config["data"],
+        config["termination"],
+        metric_report,
+        runtime,
+        visualization_manager,
+    )
     metadata = {
         "run_id": run_id,
+        "seed": int(config["experiment"]["seed"]),
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "output_dir": str(output_dir),
         "step_capacity": step_capacity,
@@ -100,17 +128,7 @@ def main():
     }
     result_handler.save_metadata(metadata)
 
-    dynamic_system = CartPoleDynamicSystem(runtime, config["dynamic_system"])
-    controller_manager = ControllerManager(
-        runtime,
-        config["control"],
-        config["agent"],
-        config["dynamic_system"],
-        config["termination"],
-        config["simulation"]["dt_sec"],
-    )
-    agent = PIDQLearningAgent(runtime, config["agent"], config["control"])
-    metric_processor = MetricProcessor(runtime, config["metrics"])
+    metric_processor = MetricProcessor(runtime, config["metrics"], config["simulation"]["dt_sec"])
     reward_calculator = RewardCalculator(runtime, config["reward"], config["agent"], config["termination"])
     metric_collector = MetricCollector(runtime, config["data"], result_handler)
 
@@ -121,17 +139,12 @@ def main():
         controller_manager=controller_manager,
         agent=agent,
         metric_processor=metric_processor,
+        metric_report=metric_report,
         reward_calculator=reward_calculator,
         metric_collector=metric_collector,
         result_handler=result_handler,
     )
     simulation_manager.run()
-
-    if bool(config["visualization"]["enabled"]):
-        from visualization_manager import VisualizationManager
-
-        visualization_manager = VisualizationManager(output_dir, config["visualization"])
-        visualization_manager.render_post_run(result_handler.summary_rows, result_handler.latest_agent_state)
 
     print(f"Run complete: {output_dir}")
 
