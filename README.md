@@ -4,7 +4,9 @@ Python simulator for a cart and inverted pendulum controlled by two PID controll
 
 This guide documents the [`v4_reward_colective` branch](https://github.com/davor-ibarra/RL_6_SimpleSystemSimulator_v2/tree/v4_reward_colective). Select that branch to use the implementation and configuration described here. The clone command below selects it automatically.
 
-The approved article data, figures, supplementary tables and their usage guide are available in the separate [supplementary materials repository](https://github.com/davor-ibarra/2q-pid-supplementary-materials).
+The supplementary figures, workbooks, prepared datasets and usage guide are available in the separate [supplementary materials repository](https://github.com/davor-ibarra/2q-pid-supplementary-materials).
+
+The complete simulation outputs underlying the article are available from the corresponding author upon request because of their large size. Contact details are provided in the article.
 
 ## Installation and first run
 
