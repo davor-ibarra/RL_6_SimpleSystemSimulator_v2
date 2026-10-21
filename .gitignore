@@ -16,6 +16,7 @@ __pycache__/
 .coverage.*
 /htmlcov/
 /coverage.xml
+/docs
 
 # Simulation output and experiment history
 /output/
